@@ -21,6 +21,9 @@ export type TestCase = {
 const API_BASE_URL = (import.meta.env.VITE_API_BASE_URL || "").replace(/\/$/, "");
 const buildApiUrl = (path: string) => `${API_BASE_URL}${path}`;
 
+const DEFAULT_API_UNREACHABLE_MESSAGE =
+  "Cannot reach backend API. If running on GitHub Pages, set VITE_API_BASE_URL to your backend URL.";
+
 export const api = {
   parseError: async (res: Response, fallback: string): Promise<string> => {
     try {
@@ -37,7 +40,10 @@ export const api = {
   // Projects
   getProjects: async (): Promise<Project[]> => {
     const res = await fetch(buildApiUrl("/api/projects"));
-    if (!res.ok) throw new Error("Failed to fetch projects");
+    if (!res.ok) {
+      const message = await api.parseError(res, DEFAULT_API_UNREACHABLE_MESSAGE);
+      throw new Error(message);
+    }
     return res.json();
   },
   createProject: async (name: string): Promise<Project> => {
@@ -46,7 +52,10 @@ export const api = {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ name }),
     });
-    if (!res.ok) throw new Error("Failed to create project");
+    if (!res.ok) {
+      const message = await api.parseError(res, "Failed to create project");
+      throw new Error(message);
+    }
     return res.json();
   },
   updateProject: async (id: string, name: string, context: string): Promise<Project> => {
@@ -55,12 +64,18 @@ export const api = {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ name, context }),
     });
-    if (!res.ok) throw new Error("Failed to update project");
+    if (!res.ok) {
+      const message = await api.parseError(res, "Failed to update project");
+      throw new Error(message);
+    }
     return res.json();
   },
   deleteProject: async (id: string): Promise<void> => {
     const res = await fetch(buildApiUrl(`/api/projects/${id}`), { method: "DELETE" });
-    if (!res.ok) throw new Error("Failed to delete project");
+    if (!res.ok) {
+      const message = await api.parseError(res, "Failed to delete project");
+      throw new Error(message);
+    }
   },
 
   // Test Cases

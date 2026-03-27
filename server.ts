@@ -7,7 +7,8 @@ import { Project } from "./src/models/Project.js";
 import { TestCaseModel } from "./src/models/TestCase.js";
 import { generateTestCases, updateTestCaseAI, regenerateTestCaseAI } from "./src/services/aiService.js";
 
-const MONGO_URI = "mongodb+srv://daotq:100897@testcase.x5m996z.mongodb.net/?appName=testcase";
+const MONGO_URI = process.env.MONGO_URI;
+const DB_UNAVAILABLE_MESSAGE = "Database is not connected. Check MONGO_URI and MongoDB Atlas network access.";
 
 async function startServer() {
   const app = express();
@@ -17,10 +18,17 @@ async function startServer() {
 
   // Connect to MongoDB
   try {
-    await mongoose.connect(MONGO_URI);
+    if (!MONGO_URI) {
+      throw new Error("MONGO_URI is not set in environment variables.");
+    }
+
+    await mongoose.connect(MONGO_URI, {
+      serverSelectionTimeoutMS: 10000,
+    });
     console.log("Connected to MongoDB");
   } catch (err) {
-    console.error("MongoDB connection error:", err);
+    const message = err instanceof Error ? err.message : String(err);
+    console.error("MongoDB connection error:", message);
   }
 
   app.get("/api/env-check", (req, res) => {
@@ -35,10 +43,15 @@ async function startServer() {
   // Projects
   app.get("/api/projects", async (req, res) => {
     try {
+      if (mongoose.connection.readyState !== 1) {
+        return res.status(503).json({ error: DB_UNAVAILABLE_MESSAGE });
+      }
+
       const projects = await Project.find().sort({ createdAt: -1 });
       res.json(projects);
     } catch (err) {
-      res.status(500).json({ error: "Failed to fetch projects" });
+      const message = err instanceof Error ? err.message : "Failed to fetch projects";
+      res.status(500).json({ error: message });
     }
   });
 

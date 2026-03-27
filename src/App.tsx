@@ -56,7 +56,8 @@ export default function App() {
         setSelectedProjectId(data[0]._id);
       }
     } catch (error) {
-      toast.error("Failed to load projects");
+      const message = error instanceof Error ? error.message : "Failed to load projects";
+      toast.error(message);
     }
   };
 
@@ -76,7 +77,8 @@ export default function App() {
       setSelectedIds(new Set());
       setExpandedIds(new Set());
     } catch (error) {
-      toast.error("Failed to load test cases");
+      const message = error instanceof Error ? error.message : "Failed to load test cases";
+      toast.error(message);
     }
   };
 
