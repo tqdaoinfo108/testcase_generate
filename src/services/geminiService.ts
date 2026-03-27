@@ -1,6 +1,7 @@
 import { GoogleGenAI, Type, Schema } from "@google/genai";
 
 const ai = new GoogleGenAI({ apiKey: 'AIzaSyDNr3k4EN_UHMEdNNMoVIeN_q5Url09wmg' });
+const GEMINI_MODEL = "gemini-2.5-flash";
 
 export type TestCase = {
   id: string;
@@ -68,7 +69,7 @@ ${requirements}
   `;
 
   const response = await ai.models.generateContent({
-    model: "gemini-3.1-pro-preview",
+    model: GEMINI_MODEL,
     contents: prompt,
     config: {
       responseMimeType: "application/json",
@@ -137,7 +138,7 @@ Return the newly regenerated test case as a JSON object matching the schema.
   };
 
   const response = await ai.models.generateContent({
-    model: "gemini-3.1-pro-preview",
+    model: GEMINI_MODEL,
     contents: prompt,
     config: {
       responseMimeType: "application/json",
@@ -211,7 +212,7 @@ Return the updated test case as a JSON object matching the schema.
   };
 
   const response = await ai.models.generateContent({
-    model: "gemini-3.1-pro-preview",
+    model: GEMINI_MODEL,
     contents: prompt,
     config: {
       responseMimeType: "application/json",
