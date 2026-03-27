@@ -7,12 +7,12 @@ import { Project } from "./src/models/Project.js";
 import { TestCaseModel } from "./src/models/TestCase.js";
 import { generateTestCases, updateTestCaseAI, regenerateTestCaseAI } from "./src/services/aiService.js";
 
-const MONGO_URI = process.env.MONGO_URI;
+const MONGO_URI = "mongodb+srv://daotq:100897@testcase.x5m996z.mongodb.net/?appName=testcase";
 const DB_UNAVAILABLE_MESSAGE = "Database is not connected. Check MONGO_URI and MongoDB Atlas network access.";
 
 async function startServer() {
   const app = express();
-  const PORT = 3000;
+  const PORT = Number(process.env.PORT) || 3000;
   const CORS_ORIGIN = process.env.CORS_ORIGIN || "*";
 
   app.use((req, res, next) => {
@@ -31,10 +31,6 @@ async function startServer() {
 
   // Connect to MongoDB
   try {
-    if (!MONGO_URI) {
-      throw new Error("MONGO_URI is not set in environment variables.");
-    }
-
     await mongoose.connect(MONGO_URI, {
       serverSelectionTimeoutMS: 10000,
     });
@@ -52,6 +48,13 @@ async function startServer() {
   });
 
   // API Routes
+
+  app.get("/api/health", (req, res) => {
+    res.json({
+      ok: true,
+      dbReady: mongoose.connection.readyState === 1,
+    });
+  });
 
   // Projects
   app.get("/api/projects", async (req, res) => {
