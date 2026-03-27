@@ -32,6 +32,14 @@ jobs:
 
       - run: npm ci
 
+      - name: Validate required frontend env
+        run: |
+          if [ -z "${{ vars.VITE_API_BASE_URL }}" ]; then
+            echo "Missing repository variable: VITE_API_BASE_URL"
+            echo "Set it in Settings > Secrets and variables > Actions > Variables"
+            exit 1
+          fi
+
       - run: npm run build
         env:
           VITE_BASE_PATH: /${{ github.event.repository.name }}/
