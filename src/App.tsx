@@ -342,7 +342,16 @@ export default function App() {
       return;
     }
 
+    const inputPrefix = window.prompt("Enter ID prefix for export (e.g., TC, QA, AUT):", "TC");
+    if (inputPrefix === null) return;
+    const exportPrefix = inputPrefix.trim().toUpperCase() || "TC";
+
     const selectedCases = testCases.filter((tc) => selectedIds.has(tc._id));
+
+    const counterStorageKey = `EXPORT_COUNTER_${selectedProjectId || "global"}_${exportPrefix}`;
+    const previousCounterValue = Number.parseInt(localStorage.getItem(counterStorageKey) || "0", 10);
+    const previousCounter = Number.isNaN(previousCounterValue) ? 0 : previousCounterValue;
+    let runningCounter = previousCounter;
     
     // Create worksheet data
     const wsData: any[][] = [];
@@ -357,9 +366,10 @@ export default function App() {
     wsData.push(headers);
     
     // Rows 5+: Data
-    selectedCases.forEach((tc, index) => {
+    selectedCases.forEach((tc) => {
+      runningCounter += 1;
       wsData.push([
-        `TC_${String(index + 1).padStart(2, '0')}`,
+        `${exportPrefix}_${String(runningCounter).padStart(2, '0')}`,
         tc.title,
         tc.preconditions,
         tc.steps.map((s, i) => `${i + 1}. ${s}`).join('\n'),
@@ -367,6 +377,8 @@ export default function App() {
         tc.expected_result
       ]);
     });
+
+    localStorage.setItem(counterStorageKey, String(runningCounter));
 
     const ws = XLSX.utils.aoa_to_sheet(wsData);
 
@@ -424,7 +436,7 @@ export default function App() {
     
     // Generate buffer and save
     XLSX.writeFile(wb, `${selectedProject?.name || 'test_cases'}.xlsx`);
-    toast.success("Exported to Excel.");
+    toast.success(`Exported to Excel with prefix ${exportPrefix}.`);
   };
 
   const openEditModal = (tc: TestCase) => {
