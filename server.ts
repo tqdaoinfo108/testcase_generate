@@ -13,7 +13,7 @@ const DB_UNAVAILABLE_MESSAGE = "Database is not connected. Check MONGO_URI and M
 async function startServer() {
   const app = express();
   const PORT = Number(process.env.PORT) || 3000;
-  const CORS_ORIGIN = process.env.CORS_ORIGIN || "*";
+  const CORS_ORIGIN = "https://tqdaoinfo108.github.io";
 
   app.use((req, res, next) => {
     res.header("Access-Control-Allow-Origin", CORS_ORIGIN);

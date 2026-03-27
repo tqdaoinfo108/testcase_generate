@@ -1,11 +1,13 @@
 import { GoogleGenAI, Type, Schema } from "@google/genai";
 
-console.log("GEMINI_API_KEY is:", process.env.GEMINI_API_KEY ? "Set" : "Not Set", "Length:", process.env.GEMINI_API_KEY?.length);
-const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
-const MODEL_NAME = process.env.GEMINI_MODEL || "gemini-2.5-flash";
+const GEMINI_API_KEY = "AIzaSyDNr3k4EN_UHMEdNNMoVIeN_q5Url09wmg";
+const MODEL_NAME = "gemini-2.5-flash";
+
+console.log("GEMINI_API_KEY is:", GEMINI_API_KEY ? "Set" : "Not Set", "Length:", GEMINI_API_KEY.length);
+const ai = new GoogleGenAI({ apiKey: GEMINI_API_KEY });
 
 function assertApiKey() {
-  if (!process.env.GEMINI_API_KEY) {
+  if (!GEMINI_API_KEY) {
     throw new Error("GEMINI_API_KEY is not set. Add it to .env.local and restart the dev server.");
   }
 }

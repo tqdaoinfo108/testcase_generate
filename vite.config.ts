@@ -1,13 +1,10 @@
 import tailwindcss from '@tailwindcss/vite';
 import react from '@vitejs/plugin-react';
 import path from 'path';
-import {defineConfig, loadEnv} from 'vite';
+import {defineConfig} from 'vite';
 
-export default defineConfig(({mode}) => {
-  const env = loadEnv(mode, process.cwd(), 'VITE_');
-  const basePath = env.VITE_BASE_PATH?.trim() || '/';
-  const normalizedBasePath = basePath.startsWith('/') ? basePath : `/${basePath}`;
-  const base = normalizedBasePath.endsWith('/') ? normalizedBasePath : `${normalizedBasePath}/`;
+export default defineConfig(() => {
+  const base = '/testcase_generate/';
 
   return {
     base,
