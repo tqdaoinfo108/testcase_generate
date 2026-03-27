@@ -1,6 +1,6 @@
 import { GoogleGenAI, Type, Schema } from "@google/genai";
 
-const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
+const ai = new GoogleGenAI({ apiKey: 'AIzaSyDNr3k4EN_UHMEdNNMoVIeN_q5Url09wmg' });
 
 export type TestCase = {
   id: string;
