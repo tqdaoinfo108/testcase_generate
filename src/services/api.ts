@@ -262,6 +262,23 @@ export const api = {
   },
   deleteTestCase: async (id: string): Promise<void> => {
     const res = await fetch(`https://api.baserow.io/api/database/rows/table/${TESTCASES_TABLE_ID}/${id}/`, { method: "DELETE", headers: getHeaders() });
-    if (!res.ok) throw new Error("Failed to delete test case");
+    if (!res.ok) {
+      let detail = "";
+      try {
+        const data = await res.json();
+        detail = data?.detail || data?.error || "";
+      } catch {
+        try {
+          detail = await res.text();
+        } catch {
+          detail = "";
+        }
+      }
+
+      const message = detail
+        ? `Failed to delete test case: ${detail}`
+        : `Failed to delete test case (HTTP ${res.status})`;
+      throw new Error(message);
+    }
   },
 };

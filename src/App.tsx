@@ -19,6 +19,7 @@ import { Sparkles, RefreshCw, Download, Trash2, Edit2, CheckSquare, Loader2, Rot
 import * as XLSX from 'xlsx-js-style';
 
 export default function App() {
+  const isGeneratingRef = React.useRef(false);
   const [projects, setProjects] = useState<Project[]>([]);
   const [selectedProjectId, setSelectedProjectId] = useState<string | null>(null);
   const [testCases, setTestCases] = useState<TestCase[]>([]);
@@ -157,6 +158,10 @@ export default function App() {
 
   // Test Case Actions
   const handleGenerate = async () => {
+    if (isGeneratingRef.current) {
+      return;
+    }
+
     if (!selectedProjectId) {
       toast.error("Please select or create a project first.");
       return;
@@ -166,6 +171,7 @@ export default function App() {
       return;
     }
 
+    isGeneratingRef.current = true;
     setIsGenerating(true);
     try {
       const { testCases: newTestCases, updatedContext } = await api.generateTestCases(selectedProjectId, newRequirements);
@@ -182,6 +188,7 @@ export default function App() {
       console.error(error);
       toast.error("Failed to generate test cases. Please try again.");
     } finally {
+      isGeneratingRef.current = false;
       setIsGenerating(false);
     }
   };
@@ -216,10 +223,40 @@ export default function App() {
     setExpandedIds(newExpanded);
   };
 
+  const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+
+  const getThrottleWaitMs = (message: string): number | null => {
+    const match = message.match(/Expected available in\s+(\d+)\s+seconds?/i);
+    if (!match) return null;
+    const seconds = Number.parseInt(match[1], 10);
+    if (Number.isNaN(seconds) || seconds <= 0) return null;
+    return (seconds + 1) * 1000;
+  };
+
+  const deleteWithRetry = async (id: string, maxAttempts = 3): Promise<void> => {
+    for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+      try {
+        await api.deleteTestCase(id);
+        return;
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        const waitMs = getThrottleWaitMs(message);
+
+        if (waitMs && attempt < maxAttempts) {
+          toast.info(`Rate limited. Retrying in ${Math.ceil(waitMs / 1000)}s...`);
+          await sleep(waitMs);
+          continue;
+        }
+
+        throw error;
+      }
+    }
+  };
+
   const handleDeleteSingle = async (id: string) => {
     if (!confirm("Delete this test case?")) return;
     try {
-      await api.deleteTestCase(id);
+      await deleteWithRetry(id);
       if (selectedProjectId) {
         await loadTestCases(selectedProjectId);
       }
@@ -238,13 +275,37 @@ export default function App() {
     if (!confirm(`Delete ${selectedIds.size} selected test case(s)?`)) return;
 
     try {
-      await Promise.all(Array.from(selectedIds.values()).map((id: string) => api.deleteTestCase(id)));
+      const ids = Array.from(selectedIds.values()) as string[];
+      let deletedCount = 0;
+      let failedCount = 0;
+
+      for (const id of ids) {
+        try {
+          await deleteWithRetry(id);
+          deletedCount += 1;
+        } catch (error) {
+          failedCount += 1;
+          console.error(`Failed to delete test case ${id}:`, error);
+        }
+
+        // Small gap between requests to avoid burst throttling.
+        await sleep(150);
+      }
+
       if (selectedProjectId) {
         await loadTestCases(selectedProjectId);
       }
-      toast.success("Deleted selected test cases.");
+
+      if (failedCount === 0) {
+        toast.success(`Deleted ${deletedCount} selected test case(s).`);
+      } else if (deletedCount > 0) {
+        toast.error(`Deleted ${deletedCount}, failed ${failedCount}. Please retry failed items.`);
+      } else {
+        toast.error("Failed to delete selected test cases.");
+      }
     } catch (error) {
-      toast.error("Failed to delete some test cases");
+      const message = error instanceof Error ? error.message : "Failed to delete selected test cases";
+      toast.error(message);
     }
   };
 
