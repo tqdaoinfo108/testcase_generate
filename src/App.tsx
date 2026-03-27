@@ -46,6 +46,9 @@ export default function App() {
   const [editDescription, setEditDescription] = useState("");
   const [isUpdating, setIsUpdating] = useState(false);
   const [regeneratingId, setRegeneratingId] = useState<string | null>(null);
+  const [isDeleting, setIsDeleting] = useState(false);
+  const [deleteProgress, setDeleteProgress] = useState<{ current: number; total: number } | null>(null);
+  const [operationStatus, setOperationStatus] = useState("");
 
   // Load Projects on Mount
   useEffect(() => {
@@ -173,6 +176,7 @@ export default function App() {
 
     isGeneratingRef.current = true;
     setIsGenerating(true);
+    setOperationStatus("Generating test cases...");
     try {
       const { testCases: newTestCases, updatedContext } = await api.generateTestCases(selectedProjectId, newRequirements);
 
@@ -190,6 +194,7 @@ export default function App() {
     } finally {
       isGeneratingRef.current = false;
       setIsGenerating(false);
+      setOperationStatus("");
     }
   };
 
@@ -255,14 +260,23 @@ export default function App() {
 
   const handleDeleteSingle = async (id: string) => {
     if (!confirm("Delete this test case?")) return;
+    setIsDeleting(true);
+    setDeleteProgress({ current: 0, total: 1 });
+    setOperationStatus("Deleting test case... 0/1");
     try {
       await deleteWithRetry(id);
+      setDeleteProgress({ current: 1, total: 1 });
+      setOperationStatus("Deleting test case... 1/1");
       if (selectedProjectId) {
         await loadTestCases(selectedProjectId);
       }
       toast.success("Deleted test case.");
     } catch (error) {
       toast.error("Failed to delete test case");
+    } finally {
+      setIsDeleting(false);
+      setDeleteProgress(null);
+      setOperationStatus("");
     }
   };
 
@@ -274,12 +288,17 @@ export default function App() {
 
     if (!confirm(`Delete ${selectedIds.size} selected test case(s)?`)) return;
 
+    setIsDeleting(true);
+    setDeleteProgress({ current: 0, total: selectedIds.size });
+    setOperationStatus(`Deleting test cases... 0/${selectedIds.size}`);
+
     try {
       const ids = Array.from(selectedIds.values()) as string[];
       let deletedCount = 0;
       let failedCount = 0;
 
-      for (const id of ids) {
+      for (let index = 0; index < ids.length; index++) {
+        const id = ids[index];
         try {
           await deleteWithRetry(id);
           deletedCount += 1;
@@ -287,6 +306,10 @@ export default function App() {
           failedCount += 1;
           console.error(`Failed to delete test case ${id}:`, error);
         }
+
+        const current = index + 1;
+        setDeleteProgress({ current, total: ids.length });
+        setOperationStatus(`Deleting test cases... ${current}/${ids.length}`);
 
         // Small gap between requests to avoid burst throttling.
         await sleep(150);
@@ -306,6 +329,10 @@ export default function App() {
     } catch (error) {
       const message = error instanceof Error ? error.message : "Failed to delete selected test cases";
       toast.error(message);
+    } finally {
+      setIsDeleting(false);
+      setDeleteProgress(null);
+      setOperationStatus("");
     }
   };
 
@@ -515,17 +542,27 @@ export default function App() {
             <Badge variant="secondary" className="ml-2 bg-slate-100 text-slate-600 shrink-0">{testCases.length}</Badge>
           </h2>
           <div className="flex items-center gap-2 shrink-0">
-            <Button variant="outline" size="sm" onClick={handleSelectAll} disabled={filteredTestCases.length === 0} className="text-slate-600">
+            <Button variant="outline" size="sm" onClick={handleSelectAll} disabled={filteredTestCases.length === 0 || isGenerating || isDeleting} className="text-slate-600">
               {selectedIds.size === filteredTestCases.length && filteredTestCases.length > 0 ? "Unselect All" : "Select All"}
             </Button>
-            <Button variant="outline" size="sm" onClick={handleDeleteSelected} disabled={selectedIds.size === 0} className="text-red-600 hover:text-red-700 hover:bg-red-50">
-              <Trash2 className="w-4 h-4 mr-1" /> Delete
+            <Button variant="outline" size="sm" onClick={handleDeleteSelected} disabled={selectedIds.size === 0 || isGenerating || isDeleting} className="text-red-600 hover:text-red-700 hover:bg-red-50">
+              {isDeleting ? <Loader2 className="w-4 h-4 mr-1 animate-spin" /> : <Trash2 className="w-4 h-4 mr-1" />} Delete
             </Button>
-            <Button variant="outline" size="sm" onClick={handleExport} disabled={selectedIds.size === 0} className="text-slate-600">
+            <Button variant="outline" size="sm" onClick={handleExport} disabled={selectedIds.size === 0 || isGenerating || isDeleting} className="text-slate-600">
               <Download className="w-4 h-4 mr-1" /> Export
             </Button>
           </div>
         </div>
+
+        {(isGenerating || isDeleting) && (
+          <div className="px-4 py-2 border-b bg-blue-50 text-blue-700 text-sm flex items-center gap-2">
+            <Loader2 className="w-4 h-4 animate-spin" />
+            <span>{operationStatus || "Processing..."}</span>
+            {deleteProgress && (
+              <Badge variant="secondary" className="bg-blue-100 text-blue-700">{deleteProgress.current}/{deleteProgress.total}</Badge>
+            )}
+          </div>
+        )}
 
         <div className="px-4 pt-2 shrink-0">
           <Tabs defaultValue="All" onValueChange={setActiveTab}>
@@ -558,6 +595,7 @@ export default function App() {
                     <Checkbox 
                       checked={selectedIds.has(tc._id)} 
                       onCheckedChange={() => toggleSelect(tc._id)}
+                      disabled={isGenerating || isDeleting}
                       className="mt-1"
                     />
                     <div className="flex-1 cursor-pointer min-w-0" onClick={() => toggleExpand(tc._id)}>
@@ -566,13 +604,13 @@ export default function App() {
                           {tc.title}
                         </CardTitle>
                         <div className="flex -mt-1 -mr-2 shrink-0" onClick={(e) => e.stopPropagation()}>
-                          <Button variant="ghost" size="icon" className="h-6 w-6 text-slate-400 hover:text-blue-600" onClick={() => handleRegenerateSingle(tc)} disabled={regeneratingId === tc._id}>
+                          <Button variant="ghost" size="icon" className="h-6 w-6 text-slate-400 hover:text-blue-600" onClick={() => handleRegenerateSingle(tc)} disabled={regeneratingId === tc._id || isGenerating || isDeleting}>
                             <RotateCcw className={`w-3.5 h-3.5 ${regeneratingId === tc._id ? 'animate-spin' : ''}`} />
                           </Button>
-                          <Button variant="ghost" size="icon" className="h-6 w-6 text-slate-400 hover:text-blue-600" onClick={() => openEditModal(tc)} disabled={regeneratingId === tc._id}>
+                          <Button variant="ghost" size="icon" className="h-6 w-6 text-slate-400 hover:text-blue-600" onClick={() => openEditModal(tc)} disabled={regeneratingId === tc._id || isGenerating || isDeleting}>
                             <Edit2 className="w-3.5 h-3.5" />
                           </Button>
-                          <Button variant="ghost" size="icon" className="h-6 w-6 text-slate-400 hover:text-red-600" onClick={() => handleDeleteSingle(tc._id)} disabled={regeneratingId === tc._id}>
+                          <Button variant="ghost" size="icon" className="h-6 w-6 text-slate-400 hover:text-red-600" onClick={() => handleDeleteSingle(tc._id)} disabled={regeneratingId === tc._id || isGenerating || isDeleting}>
                             <Trash2 className="w-3.5 h-3.5" />
                           </Button>
                           <Button variant="ghost" size="icon" className="h-6 w-6 text-slate-400 hover:text-blue-600" onClick={() => toggleExpand(tc._id)}>
@@ -672,7 +710,7 @@ export default function App() {
                 <div className="p-3 border-t bg-slate-50">
                   <Button 
                     onClick={handleGenerate} 
-                    disabled={isGenerating || !newRequirements.trim()}
+                    disabled={isGenerating || isDeleting || !newRequirements.trim()}
                     className="w-full bg-blue-600 hover:bg-blue-700 text-white shadow-sm"
                   >
                     {isGenerating ? (
