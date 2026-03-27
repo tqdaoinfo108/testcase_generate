@@ -59,13 +59,26 @@ export default function App() {
     loadProjects();
   };
 
-  const loadProjects = async () => {
+  const loadProjects = async (preferredProjectId?: string | null) => {
     try {
       const data = await api.getProjects();
       setProjects(data);
-      if (data.length > 0 && !selectedProjectId) {
-        setSelectedProjectId(data[0]._id);
+
+      if (data.length === 0) {
+        setSelectedProjectId(null);
+        return;
       }
+
+      if (preferredProjectId && data.some((p) => p._id === preferredProjectId)) {
+        setSelectedProjectId(preferredProjectId);
+        return;
+      }
+
+      if (selectedProjectId && data.some((p) => p._id === selectedProjectId)) {
+        return;
+      }
+
+      setSelectedProjectId(data[0]._id);
     } catch (error) {
       toast.error("Failed to load projects");
     }
@@ -98,8 +111,8 @@ export default function App() {
     if (!newProjectName.trim()) return;
     try {
       const project = await api.createProject(newProjectName);
-      setProjects([project, ...projects]);
-      setSelectedProjectId(project._id);
+      await loadProjects(project._id);
+      await loadTestCases(project._id);
       setIsCreateProjectOpen(false);
       setNewProjectName("");
       toast.success("Project created");
@@ -111,8 +124,8 @@ export default function App() {
   const handleRenameProject = async () => {
     if (!editingProject || !editProjectName.trim()) return;
     try {
-      const updated = await api.updateProject(editingProject._id, editProjectName, editingProject.context);
-      setProjects(projects.map(p => p._id === updated._id ? updated : p));
+      await api.updateProject(editingProject._id, editProjectName, editingProject.context);
+      await loadProjects(editingProject._id);
       setEditingProject(null);
       toast.success("Project renamed");
     } catch (error) {
@@ -125,10 +138,7 @@ export default function App() {
     if (!confirm("Are you sure you want to delete this project and all its test cases?")) return;
     try {
       await api.deleteProject(id);
-      setProjects(projects.filter(p => p._id !== id));
-      if (selectedProjectId === id) {
-        setSelectedProjectId(projects.length > 1 ? projects.find(p => p._id !== id)!._id : null);
-      }
+      await loadProjects(selectedProjectId === id ? null : selectedProjectId);
       toast.success("Project deleted");
     } catch (error) {
       toast.error("Failed to delete project");
@@ -159,14 +169,9 @@ export default function App() {
     setIsGenerating(true);
     try {
       const { testCases: newTestCases, updatedContext } = await api.generateTestCases(selectedProjectId, newRequirements);
-      
-      // Update local state
-      setTestCases([...newTestCases, ...testCases]);
-      
-      // Update project context
-      if (selectedProject) {
-        setProjects(projects.map(p => p._id === selectedProjectId ? { ...p, context: updatedContext } : p));
-      }
+
+      await loadProjects(selectedProjectId);
+      await loadTestCases(selectedProjectId);
 
       const newIds = new Set(newTestCases.map((tc) => tc._id));
       setSelectedIds(newIds);
@@ -182,6 +187,8 @@ export default function App() {
   };
 
   const handleSelectAll = () => {
+    if (filteredTestCases.length === 0) return;
+
     if (selectedIds.size === filteredTestCases.length) {
       setSelectedIds(new Set());
     } else {
@@ -209,14 +216,32 @@ export default function App() {
     setExpandedIds(newExpanded);
   };
 
-  const handleDeleteSelected = async () => {
-    if (!confirm("Delete selected test cases?")) return;
+  const handleDeleteSingle = async (id: string) => {
+    if (!confirm("Delete this test case?")) return;
     try {
-      for (const id of selectedIds) {
-        await api.deleteTestCase(id);
+      await api.deleteTestCase(id);
+      if (selectedProjectId) {
+        await loadTestCases(selectedProjectId);
       }
-      setTestCases(testCases.filter((tc) => !selectedIds.has(tc._id)));
-      setSelectedIds(new Set());
+      toast.success("Deleted test case.");
+    } catch (error) {
+      toast.error("Failed to delete test case");
+    }
+  };
+
+  const handleDeleteSelected = async () => {
+    if (selectedIds.size === 0) {
+      toast.error("No test case selected.");
+      return;
+    }
+
+    if (!confirm(`Delete ${selectedIds.size} selected test case(s)?`)) return;
+
+    try {
+      await Promise.all(Array.from(selectedIds.values()).map((id: string) => api.deleteTestCase(id)));
+      if (selectedProjectId) {
+        await loadTestCases(selectedProjectId);
+      }
       toast.success("Deleted selected test cases.");
     } catch (error) {
       toast.error("Failed to delete some test cases");
@@ -330,8 +355,10 @@ export default function App() {
 
     setIsUpdating(true);
     try {
-      const updatedTc = await api.smartEditTestCase(editingTestCase._id, editTitle, editDescription);
-      setTestCases(testCases.map((tc) => tc._id === updatedTc._id ? updatedTc : tc));
+      await api.smartEditTestCase(editingTestCase._id, editTitle, editDescription);
+      if (selectedProjectId) {
+        await loadTestCases(selectedProjectId);
+      }
       toast.success("Test case updated intelligently by AI!");
       setEditingTestCase(null);
     } catch (error) {
@@ -345,8 +372,10 @@ export default function App() {
   const handleRegenerateSingle = async (tc: TestCase) => {
     setRegeneratingId(tc._id);
     try {
-      const regeneratedTc = await api.regenerateTestCase(tc._id);
-      setTestCases(testCases.map((t) => t._id === regeneratedTc._id ? regeneratedTc : t));
+      await api.regenerateTestCase(tc._id);
+      if (selectedProjectId) {
+        await loadTestCases(selectedProjectId);
+      }
       toast.success("Test case regenerated successfully!");
     } catch (error) {
       console.error(error);
@@ -425,8 +454,8 @@ export default function App() {
             <Badge variant="secondary" className="ml-2 bg-slate-100 text-slate-600 shrink-0">{testCases.length}</Badge>
           </h2>
           <div className="flex items-center gap-2 shrink-0">
-            <Button variant="outline" size="sm" onClick={handleSelectAll} disabled={testCases.length === 0} className="text-slate-600">
-              Select All
+            <Button variant="outline" size="sm" onClick={handleSelectAll} disabled={filteredTestCases.length === 0} className="text-slate-600">
+              {selectedIds.size === filteredTestCases.length && filteredTestCases.length > 0 ? "Unselect All" : "Select All"}
             </Button>
             <Button variant="outline" size="sm" onClick={handleDeleteSelected} disabled={selectedIds.size === 0} className="text-red-600 hover:text-red-700 hover:bg-red-50">
               <Trash2 className="w-4 h-4 mr-1" /> Delete
@@ -481,6 +510,9 @@ export default function App() {
                           </Button>
                           <Button variant="ghost" size="icon" className="h-6 w-6 text-slate-400 hover:text-blue-600" onClick={() => openEditModal(tc)} disabled={regeneratingId === tc._id}>
                             <Edit2 className="w-3.5 h-3.5" />
+                          </Button>
+                          <Button variant="ghost" size="icon" className="h-6 w-6 text-slate-400 hover:text-red-600" onClick={() => handleDeleteSingle(tc._id)} disabled={regeneratingId === tc._id}>
+                            <Trash2 className="w-3.5 h-3.5" />
                           </Button>
                           <Button variant="ghost" size="icon" className="h-6 w-6 text-slate-400 hover:text-blue-600" onClick={() => toggleExpand(tc._id)}>
                             {expandedIds.has(tc._id) ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
