@@ -1,16 +1,7 @@
 import { GoogleGenAI, Type, Schema } from "@google/genai";
 
-const GEMINI_API_KEY = "AIzaSyDNr3k4EN_UHMEdNNMoVIeN_q5Url09wmg";
-const MODEL_NAME = "gemini-2.5-flash";
-
-console.log("GEMINI_API_KEY is:", GEMINI_API_KEY ? "Set" : "Not Set", "Length:", GEMINI_API_KEY.length);
-const ai = new GoogleGenAI({ apiKey: GEMINI_API_KEY });
-
-function assertApiKey() {
-  if (!GEMINI_API_KEY) {
-    throw new Error("GEMINI_API_KEY is not set. Add it to .env.local and restart the dev server.");
-  }
-}
+console.log("GEMINI_API_KEY is:", process.env.GEMINI_API_KEY ? "Set" : "Not Set", "Length:", process.env.GEMINI_API_KEY?.length);
+const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
 
 export type TestCaseData = {
   title: string;
@@ -74,7 +65,6 @@ const generateResponseSchema: Schema = {
 };
 
 export async function generateTestCases(context: string, newRequirements: string): Promise<GenerateResponse> {
-  assertApiKey();
   const prompt = `
 You are a Senior QA Engineer.
 Analyze the given Product Context and New Requirements to generate a comprehensive set of test cases.
@@ -101,7 +91,7 @@ Guidelines:
   `;
 
   const response = await ai.models.generateContent({
-    model: MODEL_NAME,
+    model: "gemini-3.1-pro-preview",
     contents: prompt,
     config: {
       responseMimeType: "application/json",
@@ -153,7 +143,6 @@ export async function updateTestCaseAI(
   newDescription: string,
   context: string
 ): Promise<TestCaseData> {
-  assertApiKey();
   const prompt = `
 You are a Senior QA Engineer.
 A user has updated the title and/or description of a test case.
@@ -172,7 +161,7 @@ Return the updated test case as a JSON object matching the schema.
   `;
 
   const response = await ai.models.generateContent({
-    model: MODEL_NAME,
+    model: "gemini-3.1-pro-preview",
     contents: prompt,
     config: {
       responseMimeType: "application/json",
@@ -191,7 +180,6 @@ export async function regenerateTestCaseAI(
   testCase: any,
   context: string
 ): Promise<TestCaseData> {
-  assertApiKey();
   const prompt = `
 You are a Senior QA Engineer.
 A user has requested to regenerate a specific test case.
@@ -207,7 +195,7 @@ Return the newly regenerated test case as a JSON object matching the schema.
   `;
 
   const response = await ai.models.generateContent({
-    model: MODEL_NAME,
+    model: "gemini-3.1-pro-preview",
     contents: prompt,
     config: {
       responseMimeType: "application/json",

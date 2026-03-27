@@ -15,7 +15,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "
 import { Toaster } from "@/components/ui/sonner";
 import { toast } from "sonner";
 import { api, Project, TestCase } from "@/src/services/api";
-import { Sparkles, RefreshCw, Download, Trash2, Edit2, CheckSquare, Loader2, RotateCcw, ChevronDown, ChevronUp, Folder, Plus, MoreVertical, PanelLeft } from "lucide-react";
+import { Sparkles, RefreshCw, Download, Trash2, Edit2, CheckSquare, Loader2, RotateCcw, ChevronDown, ChevronUp, Folder, Plus, MoreVertical, PanelLeft, Settings } from "lucide-react";
 import * as XLSX from 'xlsx-js-style';
 
 export default function App() {
@@ -29,6 +29,9 @@ export default function App() {
   const [isGenerating, setIsGenerating] = useState(false);
   const [activeTab, setActiveTab] = useState("All");
   const [isSidebarOpen, setIsSidebarOpen] = useState(true);
+  const [isSettingsOpen, setIsSettingsOpen] = useState(false);
+  const [projectsTableId, setProjectsTableId] = useState("");
+  const [testCasesTableId, setTestCasesTableId] = useState("");
 
   // Project Modals
   const [isCreateProjectOpen, setIsCreateProjectOpen] = useState(false);
@@ -48,6 +51,14 @@ export default function App() {
     loadProjects();
   }, []);
 
+  const saveSettings = () => {
+    localStorage.setItem("BASEROW_PROJECTS_TABLE_ID", projectsTableId);
+    localStorage.setItem("BASEROW_TESTCASES_TABLE_ID", testCasesTableId);
+    setIsSettingsOpen(false);
+    toast.success("Settings saved");
+    loadProjects();
+  };
+
   const loadProjects = async () => {
     try {
       const data = await api.getProjects();
@@ -56,8 +67,7 @@ export default function App() {
         setSelectedProjectId(data[0]._id);
       }
     } catch (error) {
-      const message = error instanceof Error ? error.message : "Failed to load projects";
-      toast.error(message);
+      toast.error("Failed to load projects");
     }
   };
 
@@ -77,8 +87,7 @@ export default function App() {
       setSelectedIds(new Set());
       setExpandedIds(new Set());
     } catch (error) {
-      const message = error instanceof Error ? error.message : "Failed to load test cases";
-      toast.error(message);
+      toast.error("Failed to load test cases");
     }
   };
 
@@ -166,8 +175,7 @@ export default function App() {
       toast.success(`Generated ${newTestCases.length} new test cases!`);
     } catch (error) {
       console.error(error);
-      const message = error instanceof Error ? error.message : "Failed to generate test cases. Please try again.";
-      toast.error(message);
+      toast.error("Failed to generate test cases. Please try again.");
     } finally {
       setIsGenerating(false);
     }
@@ -371,9 +379,14 @@ export default function App() {
           <h2 className="font-semibold text-white flex items-center gap-2">
             <Folder className="w-4 h-4" /> Projects
           </h2>
-          <Button variant="ghost" size="icon" className="h-6 w-6 text-slate-400 hover:text-white" onClick={() => setIsCreateProjectOpen(true)}>
-            <Plus className="w-4 h-4" />
-          </Button>
+          <div className="flex items-center gap-1">
+            <Button variant="ghost" size="icon" className="h-6 w-6 text-slate-400 hover:text-white" onClick={() => setIsSettingsOpen(true)}>
+              <Settings className="w-4 h-4" />
+            </Button>
+            <Button variant="ghost" size="icon" className="h-6 w-6 text-slate-400 hover:text-white" onClick={() => setIsCreateProjectOpen(true)}>
+              <Plus className="w-4 h-4" />
+            </Button>
+          </div>
         </div>
         <div className="flex-1 overflow-y-auto p-2 space-y-1">
           {projects.map(p => (
@@ -678,6 +691,55 @@ export default function App() {
       </Dialog>
       
       <Toaster position="bottom-right" />
+      <Dialog open={isSettingsOpen} onOpenChange={setIsSettingsOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Baserow Configuration</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4 py-4">
+            <div className="space-y-2">
+              <label className="text-sm font-medium">Projects Table ID</label>
+              <Input 
+                value={projectsTableId} 
+                onChange={(e) => setProjectsTableId(e.target.value)} 
+                placeholder="e.g. 123456"
+              />
+            </div>
+            <div className="space-y-2">
+              <label className="text-sm font-medium">Test Cases Table ID</label>
+              <Input 
+                value={testCasesTableId} 
+                onChange={(e) => setTestCasesTableId(e.target.value)} 
+                placeholder="e.g. 123457"
+              />
+            </div>
+            <div className="text-sm text-slate-500 bg-slate-50 p-3 rounded-md">
+              <p className="font-semibold mb-1">Cấu trúc bảng cần tạo trên Baserow:</p>
+              <p className="font-medium mt-2">Bảng Projects:</p>
+              <ul className="list-disc pl-4 mb-2">
+                <li>name (Single line text)</li>
+                <li>context (Long text)</li>
+                <li>createdAt (Created on)</li>
+              </ul>
+              <p className="font-medium mt-2">Bảng Test Cases:</p>
+              <ul className="list-disc pl-4">
+                <li>projectId (Single line text)</li>
+                <li>title (Single line text)</li>
+                <li>description (Long text)</li>
+                <li>preconditions (Long text)</li>
+                <li>steps (Long text)</li>
+                <li>expected_result (Long text)</li>
+                <li>type (Single select: Positive Flow, Negative Flow, Edge Case)</li>
+                <li>priority (Single select: High, Medium, Low)</li>
+                <li>createdAt (Created on)</li>
+              </ul>
+            </div>
+          </div>
+          <DialogFooter>
+            <Button onClick={saveSettings}>Save Settings</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
