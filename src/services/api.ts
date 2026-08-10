@@ -18,7 +18,7 @@ export type TestCase = {
   createdAt: string;
 };
 
-import { generateTestCases, updateTestCaseAI, regenerateTestCaseAI } from "./aiService";
+import { generateTestCases, updateTestCaseAI, regenerateTestCaseAI, type AiProviderConfig } from "./aiService";
 
 const BASEROW_API_KEY = "KUOAepR6iaz2YwJ1J9E9Sxv0f26Mf1Ns";
 const PROJECTS_TABLE_ID = "905209";
@@ -106,14 +106,14 @@ export const api = {
       createdAt: row.createdAt || new Date().toISOString(),
     }));
   },
-  generateTestCases: async (projectId: string, newRequirements: string): Promise<{ testCases: TestCase[], updatedContext: string }> => {
+  generateTestCases: async (projectId: string, newRequirements: string, providerConfig?: AiProviderConfig): Promise<{ testCases: TestCase[], updatedContext: string }> => {
     // 1. Get project context
     const projects = await api.getProjects();
     const project = projects.find(p => p._id === projectId);
     if (!project) throw new Error("Project not found");
 
     // 2. Generate test cases using AI
-    const { testCases, summarizedRequirements } = await generateTestCases(project.context, newRequirements);
+    const { testCases, summarizedRequirements } = await generateTestCases(project.context, newRequirements, providerConfig);
     
     // 3. Save test cases to Baserow
     const savedTestCases: TestCase[] = [];
@@ -156,7 +156,7 @@ export const api = {
 
     return { testCases: savedTestCases, updatedContext };
   },
-  smartEditTestCase: async (id: string, newTitle: string, newDescription: string): Promise<TestCase> => {
+  smartEditTestCase: async (id: string, newTitle: string, newDescription: string, providerConfig?: AiProviderConfig): Promise<TestCase> => {
     // 1. Get existing test case
     const resGet = await fetch(`https://api.baserow.io/api/database/rows/table/${TESTCASES_TABLE_ID}/${id}/?user_field_names=true`, { headers: getHeaders() });
     if (!resGet.ok) throw new Error("Failed to fetch test case");
@@ -177,7 +177,7 @@ export const api = {
     const context = project?.context || "";
 
     // 2. AI update
-    const updatedData = await updateTestCaseAI(existingTestCase as any, newTitle, newDescription, context);
+    const updatedData = await updateTestCaseAI(existingTestCase as any, newTitle, newDescription, context, providerConfig);
 
     // 3. Save to Baserow
     const resUpdate = await fetch(`https://api.baserow.io/api/database/rows/table/${TESTCASES_TABLE_ID}/${id}/?user_field_names=true`, {
@@ -208,7 +208,7 @@ export const api = {
       createdAt: updatedRow.createdAt || new Date().toISOString(),
     };
   },
-  regenerateTestCase: async (id: string): Promise<TestCase> => {
+  regenerateTestCase: async (id: string, providerConfig?: AiProviderConfig): Promise<TestCase> => {
     // 1. Get existing test case
     const resGet = await fetch(`https://api.baserow.io/api/database/rows/table/${TESTCASES_TABLE_ID}/${id}/?user_field_names=true`, { headers: getHeaders() });
     if (!resGet.ok) throw new Error("Failed to fetch test case");
@@ -229,7 +229,7 @@ export const api = {
     const context = project?.context || "";
 
     // 2. AI regenerate
-    const updatedData = await regenerateTestCaseAI(existingTestCase as any, context);
+    const updatedData = await regenerateTestCaseAI(existingTestCase as any, context, providerConfig);
 
     // 3. Save to Baserow
     const resUpdate = await fetch(`https://api.baserow.io/api/database/rows/table/${TESTCASES_TABLE_ID}/${id}/?user_field_names=true`, {

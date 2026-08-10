@@ -8,8 +8,17 @@ if (!GEMINI_API_KEY) {
   console.warn("Gemini API key is missing. Set VITE_GEMINI_API_KEY (frontend build) or GEMINI_API_KEY (server).");
 }
 
-const ai = new GoogleGenAI({ apiKey: GEMINI_API_KEY });
 const GEMINI_MODEL = "gemini-2.5-flash";
+const NVIDIA_INVOKE_URL = "https://integrate.api.nvidia.com/v1/chat/completions";
+const NVIDIA_MODEL = "google/gemma-4-31b-it";
+
+export type AiProvider = "gemini" | "nvidia";
+
+export type AiProviderConfig = {
+  provider?: AiProvider;
+  apiKey?: string;
+  model?: string;
+};
 
 export type TestCaseData = {
   title: string;
@@ -25,6 +34,68 @@ export type GenerateResponse = {
   testCases: TestCaseData[];
   summarizedRequirements: string;
 };
+
+const priorityGuidance = `
+Priority assessment (required): assign exactly one priority based on the impact if the scenario fails and its likelihood of occurring.
+- High: blocks a critical user journey, causes data loss/security/privacy risk, payment/authentication failure, or has no practical workaround.
+- Medium: affects an important feature with a reasonable workaround and limited business impact.
+- Low: cosmetic, minor usability, or rare edge behavior with minimal impact.
+Evaluate priority independently for every test case; do not default all cases to the same value.`;
+
+function parseJsonResponse(text: string): unknown {
+  const normalized = text.trim().replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/, "");
+  return JSON.parse(normalized);
+}
+
+async function generateJson(
+  prompt: string,
+  responseSchema: Schema,
+  temperature: number,
+  providerConfig: AiProviderConfig = {},
+): Promise<unknown> {
+  const provider = providerConfig.provider || "gemini";
+
+  if (provider === "nvidia") {
+    if (!providerConfig.apiKey?.trim()) {
+      throw new Error("NVIDIA API key is required.");
+    }
+
+    const response = await fetch(NVIDIA_INVOKE_URL, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${providerConfig.apiKey.trim()}`,
+        Accept: "application/json",
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        messages: [{ role: "user", content: `${prompt}\n\nReturn only valid JSON. Do not use Markdown code fences.` }],
+        model: providerConfig.model?.trim() || NVIDIA_MODEL,
+        chat_template_kwargs: { enable_thinking: true },
+        max_tokens: 16384,
+        stream: false,
+        temperature,
+        top_p: 0.95,
+      }),
+    });
+    const body = await response.text();
+    if (!response.ok) {
+      throw new Error(`NVIDIA API request failed (${response.status}): ${body.slice(0, 500)}`);
+    }
+    const data = JSON.parse(body) as { choices?: Array<{ message?: { content?: string } }> };
+    const content = data.choices?.[0]?.message?.content;
+    if (!content) throw new Error("No response from NVIDIA API.");
+    return parseJsonResponse(content);
+  }
+
+  const gemini = new GoogleGenAI({ apiKey: providerConfig.apiKey?.trim() || GEMINI_API_KEY });
+  const response = await gemini.models.generateContent({
+    model: providerConfig.model?.trim() || GEMINI_MODEL,
+    contents: prompt,
+    config: { responseMimeType: "application/json", responseSchema, temperature },
+  });
+  if (!response.text) throw new Error("No response from Gemini API.");
+  return parseJsonResponse(response.text);
+}
 
 const testCaseSchema: Schema = {
   type: Type.ARRAY,
@@ -72,7 +143,7 @@ const generateResponseSchema: Schema = {
   required: ["testCases", "summarizedRequirements"],
 };
 
-export async function generateTestCases(context: string, newRequirements: string): Promise<GenerateResponse> {
+export async function generateTestCases(context: string, newRequirements: string, providerConfig?: AiProviderConfig): Promise<GenerateResponse> {
   const prompt = `
 You are a Senior QA Engineer.
 Analyze the given Product Context and New Requirements to generate a comprehensive set of test cases.
@@ -96,22 +167,9 @@ Guidelines:
 - Group test cases logically by feature.
 - Use clear, concise, and professional QA language.
 - Avoid duplication with existing context.
+${priorityGuidance}
   `;
-
-  const response = await ai.models.generateContent({
-    model: GEMINI_MODEL,
-    contents: prompt,
-    config: {
-      responseMimeType: "application/json",
-      responseSchema: generateResponseSchema,
-      temperature: 0.2,
-    },
-  });
-
-  const text = response.text;
-  if (!text) throw new Error("No response from AI");
-
-  return JSON.parse(text) as GenerateResponse;
+  return await generateJson(prompt, generateResponseSchema, 0.2, providerConfig) as GenerateResponse;
 }
 
 const singleTestCaseSchema: Schema = {
@@ -149,7 +207,8 @@ export async function updateTestCaseAI(
   testCase: any,
   newTitle: string,
   newDescription: string,
-  context: string
+  context: string,
+  providerConfig?: AiProviderConfig,
 ): Promise<TestCaseData> {
   const prompt = `
 You are a Senior QA Engineer.
@@ -166,27 +225,15 @@ New Title: ${newTitle}
 New Description: ${newDescription}
 
 Return the updated test case as a JSON object matching the schema.
+${priorityGuidance}
   `;
-
-  const response = await ai.models.generateContent({
-    model: GEMINI_MODEL,
-    contents: prompt,
-    config: {
-      responseMimeType: "application/json",
-      responseSchema: singleTestCaseSchema,
-      temperature: 0.2,
-    },
-  });
-
-  const text = response.text;
-  if (!text) throw new Error("No response from AI");
-
-  return JSON.parse(text) as TestCaseData;
+  return await generateJson(prompt, singleTestCaseSchema, 0.2, providerConfig) as TestCaseData;
 }
 
 export async function regenerateTestCaseAI(
   testCase: any,
-  context: string
+  context: string,
+  providerConfig?: AiProviderConfig,
 ): Promise<TestCaseData> {
   const prompt = `
 You are a Senior QA Engineer.
@@ -200,20 +247,7 @@ Original Test Case to Regenerate:
 ${JSON.stringify(testCase, null, 2)}
 
 Return the newly regenerated test case as a JSON object matching the schema.
+${priorityGuidance}
   `;
-
-  const response = await ai.models.generateContent({
-    model: GEMINI_MODEL,
-    contents: prompt,
-    config: {
-      responseMimeType: "application/json",
-      responseSchema: singleTestCaseSchema,
-      temperature: 0.4,
-    },
-  });
-
-  const text = response.text;
-  if (!text) throw new Error("No response from AI");
-
-  return JSON.parse(text) as TestCaseData;
+  return await generateJson(prompt, singleTestCaseSchema, 0.4, providerConfig) as TestCaseData;
 }

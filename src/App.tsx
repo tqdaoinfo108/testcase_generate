@@ -15,6 +15,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "
 import { Toaster } from "@/components/ui/sonner";
 import { toast } from "sonner";
 import { api, Project, TestCase } from "@/src/services/api";
+import type { AiProvider, AiProviderConfig } from "@/src/services/aiService";
 import { Sparkles, RefreshCw, Download, Trash2, Edit2, CheckSquare, Loader2, RotateCcw, ChevronDown, ChevronUp, Folder, Plus, MoreVertical, PanelLeft, Settings } from "lucide-react";
 import * as XLSX from 'xlsx-js-style';
 
@@ -49,6 +50,11 @@ export default function App() {
   const [isDeleting, setIsDeleting] = useState(false);
   const [deleteProgress, setDeleteProgress] = useState<{ current: number; total: number } | null>(null);
   const [operationStatus, setOperationStatus] = useState("");
+  const [aiFallbackError, setAiFallbackError] = useState("");
+  const [isAiFallbackOpen, setIsAiFallbackOpen] = useState(false);
+  const [fallbackProvider, setFallbackProvider] = useState<AiProvider>("nvidia");
+  const [fallbackApiKey, setFallbackApiKey] = useState("");
+  const [fallbackModel, setFallbackModel] = useState("google/gemma-4-31b-it");
 
   // Load Projects on Mount
   useEffect(() => {
@@ -160,7 +166,7 @@ export default function App() {
   };
 
   // Test Case Actions
-  const handleGenerate = async () => {
+  const runGenerate = async (providerConfig?: AiProviderConfig) => {
     if (isGeneratingRef.current) {
       return;
     }
@@ -178,7 +184,7 @@ export default function App() {
     setIsGenerating(true);
     setOperationStatus("Generating test cases...");
     try {
-      const { testCases: newTestCases, updatedContext } = await api.generateTestCases(selectedProjectId, newRequirements);
+      const { testCases: newTestCases, updatedContext } = await api.generateTestCases(selectedProjectId, newRequirements, providerConfig);
 
       await loadProjects(selectedProjectId);
       await loadTestCases(selectedProjectId);
@@ -190,12 +196,34 @@ export default function App() {
       toast.success(`Generated ${newTestCases.length} new test cases!`);
     } catch (error) {
       console.error(error);
-      toast.error("Failed to generate test cases. Please try again.");
+      const message = error instanceof Error ? error.message : "Failed to generate test cases.";
+      if (!providerConfig || providerConfig.provider === "gemini") {
+        setAiFallbackError(message);
+        setIsAiFallbackOpen(true);
+        toast.error("Gemini failed. Choose a fallback provider to retry.");
+      } else {
+        toast.error(`Failed to generate test cases with ${providerConfig.provider}. Please check the API key and model.`);
+      }
     } finally {
       isGeneratingRef.current = false;
       setIsGenerating(false);
       setOperationStatus("");
     }
+  };
+
+  const handleGenerate = async () => runGenerate();
+
+  const handleRetryWithFallback = async () => {
+    if (!fallbackApiKey.trim()) {
+      toast.error("Enter an API key for the fallback provider.");
+      return;
+    }
+    setIsAiFallbackOpen(false);
+    await runGenerate({
+      provider: fallbackProvider,
+      apiKey: fallbackApiKey,
+      model: fallbackModel,
+    });
   };
 
   const handleSelectAll = () => {
@@ -362,7 +390,7 @@ export default function App() {
     wsData.push([]);
     
     // Row 4: Header
-    const headers = ["ID", "Test Case", "Pre-Condition", "Test Steps", "Test Data", "Expected Result"];
+    const headers = ["ID", "Test Case", "Pre-Condition", "Test Steps", "Test Data", "Expected Result", "Priority"];
     wsData.push(headers);
     
     // Rows 5+: Data
@@ -374,7 +402,8 @@ export default function App() {
         tc.preconditions,
         tc.steps.map((s, i) => `${i + 1}. ${s}`).join('\n'),
         "", // Test Data
-        tc.expected_result
+        tc.expected_result,
+        tc.priority
       ]);
     });
 
@@ -406,7 +435,7 @@ export default function App() {
     };
 
     // Apply styles to all cells
-    const range = XLSX.utils.decode_range(ws['!ref'] || "A1:F1");
+    const range = XLSX.utils.decode_range(ws['!ref'] || "A1:G1");
     for (let R = 3; R <= range.e.r; ++R) {
       for (let C = 0; C <= range.e.c; ++C) {
         const cellAddress = { c: C, r: R };
@@ -429,6 +458,7 @@ export default function App() {
       { wch: 50 },  // Test Steps
       { wch: 20 },  // Test Data
       { wch: 40 },  // Expected Result
+      { wch: 12 },  // Priority
     ];
 
     const wb = XLSX.utils.book_new();
@@ -739,6 +769,53 @@ export default function App() {
       </div>
 
       {/* Modals */}
+
+      <Dialog open={isAiFallbackOpen} onOpenChange={setIsAiFallbackOpen}>
+        <DialogContent className="sm:max-w-[460px]">
+          <DialogHeader>
+            <DialogTitle>Gemini is unavailable</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4 py-2">
+            <p className="rounded-md bg-red-50 p-3 text-sm text-red-700">
+              {aiFallbackError}
+            </p>
+            <div className="space-y-2">
+              <label className="text-sm font-medium text-slate-700">Fallback provider</label>
+              <select
+                value={fallbackProvider}
+                onChange={(event) => {
+                  const provider = event.target.value as AiProvider;
+                  setFallbackProvider(provider);
+                  setFallbackModel(provider === "nvidia" ? "google/gemma-4-31b-it" : "gemini-2.5-flash");
+                }}
+                className="flex h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-sm"
+              >
+                <option value="nvidia">NVIDIA NIM</option>
+                <option value="gemini">Gemini (another API key)</option>
+              </select>
+            </div>
+            <div className="space-y-2">
+              <label className="text-sm font-medium text-slate-700">API key</label>
+              <Input
+                type="password"
+                value={fallbackApiKey}
+                onChange={(event) => setFallbackApiKey(event.target.value)}
+                placeholder={fallbackProvider === "nvidia" ? "nvapi-..." : "Gemini API key"}
+                autoComplete="off"
+              />
+              <p className="text-xs text-slate-500">The key is used only for this retry and is not saved.</p>
+            </div>
+            <div className="space-y-2">
+              <label className="text-sm font-medium text-slate-700">Model</label>
+              <Input value={fallbackModel} onChange={(event) => setFallbackModel(event.target.value)} />
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setIsAiFallbackOpen(false)}>Cancel</Button>
+            <Button onClick={handleRetryWithFallback}>Retry generation</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
       
       {/* Create Project Modal */}
       <Dialog open={isCreateProjectOpen} onOpenChange={setIsCreateProjectOpen}>
@@ -886,4 +963,3 @@ export default function App() {
     </div>
   );
 }
-
