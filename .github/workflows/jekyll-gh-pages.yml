@@ -35,6 +35,8 @@ jobs:
       - run: npm run build
         env:
           VITE_BASE_PATH: /${{ github.event.repository.name }}/
+          VITE_BASEROW_API_URL: ${{ vars.BASEROW_API_URL || 'https://api.baserow.io/api/database/rows/table' }}
+          VITE_BASEROW_TOKEN: ${{ vars.BASEROW_TOKEN }}
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY || vars.GEMINI_API_KEY }}
           VITE_GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY || vars.GEMINI_API_KEY }}
 
