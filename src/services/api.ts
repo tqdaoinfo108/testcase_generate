@@ -22,7 +22,7 @@ import { analyzeRequirements, generateSecurityTestCases, generateTestCases, upda
 import type { Requirement } from "./qaWorkspace";
 import { loadQaProfile } from "./qaBaserow";
 
-const BASEROW_API_KEY = import.meta.env.VITE_BASEROW_TOKEN || "";
+const BASEROW_API_KEY = import.meta.env.VITE_BASEROW_TOKEN || "KUOAepR6iaz2YwJ1J9E9Sxv0f26Mf1Ns";
 const BASEROW_URL = import.meta.env.VITE_BASEROW_API_URL || "https://api.baserow.io/api/database/rows/table";
 const PROJECTS_TABLE_ID = "905209";
 const TESTCASES_TABLE_ID = "905210";
