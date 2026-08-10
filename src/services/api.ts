@@ -20,17 +20,13 @@ export type TestCase = {
 
 import { analyzeRequirements, generateSecurityTestCases, generateTestCases, updateTestCaseAI, regenerateTestCaseAI, type AiProviderConfig, type TestCaseData } from "./aiService";
 import type { Requirement } from "./qaWorkspace";
-import { loadQaProfile } from "./qaBaserow";
+import { BASEROW_CONFIG, baserowHeaders, loadQaProfile } from "./qaBaserow";
 
-const BASEROW_API_KEY = import.meta.env.VITE_BASEROW_TOKEN || "KUOAepR6iaz2YwJ1J9E9Sxv0f26Mf1Ns";
-const BASEROW_URL = import.meta.env.VITE_BASEROW_API_URL || "https://api.baserow.io/api/database/rows/table";
+const BASEROW_URL = BASEROW_CONFIG.baseUrl;
 const PROJECTS_TABLE_ID = "905209";
 const TESTCASES_TABLE_ID = "905210";
 
-const getHeaders = () => ({
-  "Authorization": `Token ${BASEROW_API_KEY}`,
-  "Content-Type": "application/json"
-});
+const getHeaders = baserowHeaders;
 const withQaProfile = async (projectId: string, context: string) => {
   const profile = await loadQaProfile(projectId);
   return profile ? `${context}\n\nQA PROJECT PROFILE:\n${Object.entries(profile).filter(([key, value]) => !["id", "projectId", "updatedAt"].includes(key) && value).map(([key, value]) => `${key}: ${value}`).join("\n")}` : context;

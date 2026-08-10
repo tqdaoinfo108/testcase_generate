@@ -1,5 +1,5 @@
 import type { TestCase } from "./api";
-import { createQaRow, listQaRows, updateQaRow } from "./qaBaserow";
+import { createQaRow, deleteQaRow, listQaRows, updateQaRow } from "./qaBaserow";
 
 export type Requirement = { rowId?: number; id: string; title: string; statement: string; acceptanceCriteria: string[]; risks: string[]; source?: string; status?: string };
 export type ReviewFinding = { severity: "High" | "Medium" | "Low"; category: "Coverage" | "Clarity" | "Data" | "Expected result" | "Duplication" | "Risk"; message: string; suggestion: string };
@@ -34,7 +34,7 @@ export async function saveRequirements(projectId: string, requirements: Requirem
     if (item.rowId) await updateQaRow("requirements", item.rowId, fields); else await createQaRow("requirements", { ...fields, createdAt: new Date().toISOString() });
   }));
 }
-export async function deleteRequirement(rowId: number) { await fetch(`${import.meta.env.VITE_BASEROW_API_URL || "https://api.baserow.io/api/database/rows/table"}/1124592/${rowId}/?user_field_names=true`, { method: "DELETE", headers: { Authorization: `Token ${import.meta.env.VITE_BASEROW_TOKEN || ""}` } }); }
+export async function deleteRequirement(rowId: number) { await deleteQaRow("requirements", rowId); }
 export async function saveReview(projectId: string, review: TestCaseReview) { const fields = { Name: `Review ${review.testCaseId}`, projectId, testCaseId: review.testCaseId, qualityScore: review.score, priorityReason: review.priorityReason, riskAreas: JSON.stringify(review.riskAreas), findings: JSON.stringify(review.findings), reviewStatus: review.reviewStatus || "Open", reviewedAt: new Date().toISOString() }; return review.rowId ? updateQaRow("reviews", review.rowId, fields) : createQaRow("reviews", fields); }
 export async function saveExecution(projectId: string, testCaseId: string, record: ExecutionRecord) { const fields = { Name: `Execution ${testCaseId}`, projectId, testCaseId, status: record.status, actualResult: record.actualResult, evidenceUrl: record.evidenceUrl, defectId: record.defectId, executedBy: record.executedBy, executedAt: new Date().toISOString(), updatedAt: new Date().toISOString() }; return record.rowId ? updateQaRow("execution", record.rowId, fields) : createQaRow("execution", fields); }
 export async function saveTestData(projectId: string, testCaseId: string, data: TestDataSet) { const fields = { Name: `Test data ${testCaseId}`, projectId, templateId: "", relatedTestCaseId: testCaseId, category: "AI generated", inputValues: JSON.stringify(data.items), expectedOutcome: "See input values", updatedAt: new Date().toISOString() }; return data.rowId ? updateQaRow("dataSets", data.rowId, fields) : createQaRow("dataSets", { ...fields, createdAt: new Date().toISOString() }); }
