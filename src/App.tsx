@@ -16,6 +16,8 @@ import { Toaster } from "@/components/ui/sonner";
 import { toast } from "sonner";
 import { api, Project, TestCase } from "@/src/services/api";
 import type { AiProvider, AiProviderConfig } from "@/src/services/aiService";
+import { QaWorkspaceDialog } from "@/src/components/QaWorkspaceDialog";
+import { getExecution, loadQaWorkspace } from "@/src/services/qaWorkspace";
 import { Sparkles, RefreshCw, Download, Trash2, Edit2, CheckSquare, Loader2, RotateCcw, ChevronDown, ChevronUp, Folder, Plus, MoreVertical, PanelLeft, Settings } from "lucide-react";
 import * as XLSX from 'xlsx-js-style';
 
@@ -32,6 +34,7 @@ export default function App() {
   const [activeTab, setActiveTab] = useState("All");
   const [isSidebarOpen, setIsSidebarOpen] = useState(true);
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
+  const [isQaWorkspaceOpen, setIsQaWorkspaceOpen] = useState(false);
   const [projectsTableId, setProjectsTableId] = useState("");
   const [testCasesTableId, setTestCasesTableId] = useState("");
 
@@ -52,9 +55,9 @@ export default function App() {
   const [operationStatus, setOperationStatus] = useState("");
   const [aiFallbackError, setAiFallbackError] = useState("");
   const [isAiFallbackOpen, setIsAiFallbackOpen] = useState(false);
-  const [fallbackProvider, setFallbackProvider] = useState<AiProvider>("nvidia");
+  const [fallbackProvider, setFallbackProvider] = useState<AiProvider>("gemini");
   const [fallbackApiKey, setFallbackApiKey] = useState("");
-  const [fallbackModel, setFallbackModel] = useState("google/gemma-4-31b-it");
+  const [fallbackModel, setFallbackModel] = useState("gemini-2.5-flash");
 
   // Load Projects on Mount
   useEffect(() => {
@@ -197,10 +200,10 @@ export default function App() {
     } catch (error) {
       console.error(error);
       const message = error instanceof Error ? error.message : "Failed to generate test cases.";
-      if (!providerConfig || providerConfig.provider === "gemini") {
+      if (!providerConfig) {
         setAiFallbackError(message);
         setIsAiFallbackOpen(true);
-        toast.error("Gemini failed. Choose a fallback provider to retry.");
+        toast.error("Default AI provider failed. Choose a fallback provider to retry.");
       } else {
         toast.error(`Failed to generate test cases with ${providerConfig.provider}. Please check the API key and model.`);
       }
@@ -390,20 +393,28 @@ export default function App() {
     wsData.push([]);
     
     // Row 4: Header
-    const headers = ["ID", "Test Case", "Pre-Condition", "Test Steps", "Test Data", "Expected Result", "Priority"];
+    const headers = ["ID", "Test Case", "Pre-Condition", "Test Steps", "Test Data", "Expected Result", "Priority", "Priority Reason", "Execution Status", "Actual Result", "Defect ID"];
     wsData.push(headers);
     
     // Rows 5+: Data
+    const qaWorkspace = loadQaWorkspace(selectedProjectId);
     selectedCases.forEach((tc) => {
       runningCounter += 1;
+      const review = qaWorkspace.reviews.find((item) => item.testCaseId === tc._id);
+      const testData = qaWorkspace.testData.find((item) => item.testCaseId === tc._id);
+      const execution = getExecution(qaWorkspace, tc._id);
       wsData.push([
         `${exportPrefix}_${String(runningCounter).padStart(2, '0')}`,
         tc.title,
         tc.preconditions,
         tc.steps.map((s, i) => `${i + 1}. ${s}`).join('\n'),
-        "", // Test Data
+        testData?.items.map((item) => `${item.label}: ${item.value}`).join('\n') || "",
         tc.expected_result,
-        tc.priority
+        tc.priority,
+        review?.priorityReason || "",
+        execution.status,
+        execution.actualResult,
+        execution.defectId,
       ]);
     });
 
@@ -435,7 +446,7 @@ export default function App() {
     };
 
     // Apply styles to all cells
-    const range = XLSX.utils.decode_range(ws['!ref'] || "A1:G1");
+    const range = XLSX.utils.decode_range(ws['!ref'] || "A1:K1");
     for (let R = 3; R <= range.e.r; ++R) {
       for (let C = 0; C <= range.e.c; ++C) {
         const cellAddress = { c: C, r: R };
@@ -459,6 +470,10 @@ export default function App() {
       { wch: 20 },  // Test Data
       { wch: 40 },  // Expected Result
       { wch: 12 },  // Priority
+      { wch: 32 },  // Priority Reason
+      { wch: 16 },  // Execution Status
+      { wch: 40 },  // Actual Result
+      { wch: 16 },  // Defect ID
     ];
 
     const wb = XLSX.utils.book_new();
@@ -584,6 +599,9 @@ export default function App() {
             <Badge variant="secondary" className="ml-2 bg-slate-100 text-slate-600 shrink-0">{testCases.length}</Badge>
           </h2>
           <div className="flex items-center gap-2 shrink-0">
+            <Button variant="outline" size="sm" onClick={() => setIsQaWorkspaceOpen(true)} disabled={!selectedProject || isGenerating || isDeleting} className="text-slate-700">
+              <CheckSquare className="w-4 h-4 mr-1" /> QA Workspace
+            </Button>
             <Button variant="outline" size="sm" onClick={handleSelectAll} disabled={filteredTestCases.length === 0 || isGenerating || isDeleting} className="text-slate-600">
               {selectedIds.size === filteredTestCases.length && filteredTestCases.length > 0 ? "Unselect All" : "Select All"}
             </Button>
@@ -770,10 +788,19 @@ export default function App() {
 
       {/* Modals */}
 
+      <QaWorkspaceDialog
+        open={isQaWorkspaceOpen}
+        onOpenChange={setIsQaWorkspaceOpen}
+        projectId={selectedProjectId}
+        requirementsInput={newRequirements.trim() || selectedProject?.context || ""}
+        testCases={testCases}
+        onTestCasesChanged={async () => { if (selectedProjectId) await loadTestCases(selectedProjectId); }}
+      />
+
       <Dialog open={isAiFallbackOpen} onOpenChange={setIsAiFallbackOpen}>
         <DialogContent className="sm:max-w-[460px]">
           <DialogHeader>
-            <DialogTitle>Gemini is unavailable</DialogTitle>
+            <DialogTitle>AI provider is unavailable</DialogTitle>
           </DialogHeader>
           <div className="space-y-4 py-2">
             <p className="rounded-md bg-red-50 p-3 text-sm text-red-700">
@@ -790,8 +817,8 @@ export default function App() {
                 }}
                 className="flex h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-sm"
               >
-                <option value="nvidia">NVIDIA NIM</option>
                 <option value="gemini">Gemini (another API key)</option>
+                <option value="nvidia">NVIDIA NIM (another API key)</option>
               </select>
             </div>
             <div className="space-y-2">

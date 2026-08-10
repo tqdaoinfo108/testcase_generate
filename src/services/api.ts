@@ -18,7 +18,8 @@ export type TestCase = {
   createdAt: string;
 };
 
-import { generateTestCases, updateTestCaseAI, regenerateTestCaseAI, type AiProviderConfig } from "./aiService";
+import { analyzeRequirements, generateSecurityTestCases, generateTestCases, updateTestCaseAI, regenerateTestCaseAI, type AiProviderConfig, type TestCaseData } from "./aiService";
+import type { Requirement } from "./qaWorkspace";
 
 const BASEROW_API_KEY = "KUOAepR6iaz2YwJ1J9E9Sxv0f26Mf1Ns";
 const PROJECTS_TABLE_ID = "905209";
@@ -28,6 +29,26 @@ const getHeaders = () => ({
   "Authorization": `Token ${BASEROW_API_KEY}`,
   "Content-Type": "application/json"
 });
+
+const toTestCase = (row: any, projectId = ""): TestCase => ({
+  _id: row.id.toString(), projectId: row.projectId || projectId, title: row.title || "", description: row.description || "",
+  preconditions: row.preconditions || "", steps: row.steps ? JSON.parse(row.steps) : [], expected_result: row.expected_result || "",
+  type: row.type?.value || "Positive Flow", priority: row.priority?.value || "Medium", createdAt: row.createdAt || new Date().toISOString(),
+});
+
+async function saveGeneratedTestCases(projectId: string, testCases: TestCaseData[]): Promise<TestCase[]> {
+  const saved: TestCase[] = [];
+  for (const testCase of testCases) {
+    const res = await fetch(`https://api.baserow.io/api/database/rows/table/${TESTCASES_TABLE_ID}/?user_field_names=true`, {
+      method: "POST", headers: getHeaders(), body: JSON.stringify({ projectId, title: testCase.title, description: testCase.description,
+        preconditions: testCase.preconditions, steps: JSON.stringify(testCase.steps), expected_result: testCase.expected_result,
+        type: testCase.type, priority: testCase.priority, createdAt: new Date().toISOString() }),
+    });
+    if (!res.ok) throw new Error("Failed to save generated test case");
+    saved.push(toTestCase(await res.json(), projectId));
+  }
+  return saved;
+}
 
 export const api = {
   // Projects
@@ -116,45 +137,24 @@ export const api = {
     const { testCases, summarizedRequirements } = await generateTestCases(project.context, newRequirements, providerConfig);
     
     // 3. Save test cases to Baserow
-    const savedTestCases: TestCase[] = [];
-    for (const tc of testCases) {
-      const res = await fetch(`https://api.baserow.io/api/database/rows/table/${TESTCASES_TABLE_ID}/?user_field_names=true`, {
-        method: "POST",
-        headers: getHeaders(),
-        body: JSON.stringify({
-          projectId,
-          title: tc.title,
-          description: tc.description,
-          preconditions: tc.preconditions,
-          steps: JSON.stringify(tc.steps),
-          expected_result: tc.expected_result,
-          type: tc.type,
-          priority: tc.priority,
-          createdAt: new Date().toISOString(),
-        }),
-      });
-      if (res.ok) {
-        const row = await res.json();
-        savedTestCases.push({
-          _id: row.id.toString(),
-          projectId: row.projectId || "",
-          title: row.title || "",
-          description: row.description || "",
-          preconditions: row.preconditions || "",
-          steps: row.steps ? JSON.parse(row.steps) : [],
-          expected_result: row.expected_result || "",
-          type: row.type?.value || "Positive Flow",
-          priority: row.priority?.value || "Medium",
-          createdAt: row.createdAt || new Date().toISOString(),
-        });
-      }
-    }
+    const savedTestCases = await saveGeneratedTestCases(projectId, testCases);
 
     // 4. Update project context
     const updatedContext = project.context ? `${project.context}\n\n### New Requirements Summary\n${summarizedRequirements}` : summarizedRequirements;
     await api.updateProject(projectId, project.name, updatedContext);
 
     return { testCases: savedTestCases, updatedContext };
+  },
+  analyzeRequirements: async (projectId: string, requirements: string, providerConfig?: AiProviderConfig): Promise<Requirement[]> => {
+    const project = (await api.getProjects()).find((item) => item._id === projectId);
+    if (!project) throw new Error("Project not found");
+    return (await analyzeRequirements(project.context, requirements, providerConfig)).requirements;
+  },
+  generateSecurityTestCases: async (projectId: string, requirements: string, providerConfig?: AiProviderConfig): Promise<TestCase[]> => {
+    const project = (await api.getProjects()).find((item) => item._id === projectId);
+    if (!project) throw new Error("Project not found");
+    const generated = await generateSecurityTestCases(project.context, requirements, providerConfig);
+    return saveGeneratedTestCases(projectId, generated);
   },
   smartEditTestCase: async (id: string, newTitle: string, newDescription: string, providerConfig?: AiProviderConfig): Promise<TestCase> => {
     // 1. Get existing test case

@@ -1,15 +1,13 @@
 import { GoogleGenAI, Type, Schema } from "@google/genai";
+import type { Requirement, TestCaseReview, TestDataSet } from "./qaWorkspace";
 
 const apiKeyFromVite = typeof import.meta !== "undefined" ? import.meta.env?.VITE_GEMINI_API_KEY : undefined;
 const apiKeyFromNode = typeof process !== "undefined" ? process.env?.GEMINI_API_KEY : undefined;
 const GEMINI_API_KEY = apiKeyFromVite || apiKeyFromNode || "";
 
-if (!GEMINI_API_KEY) {
-  console.warn("Gemini API key is missing. Set VITE_GEMINI_API_KEY (frontend build) or GEMINI_API_KEY (server).");
-}
-
 const GEMINI_MODEL = "gemini-2.5-flash";
-const NVIDIA_INVOKE_URL = "https://integrate.api.nvidia.com/v1/chat/completions";
+const API_BASE_URL = typeof import.meta !== "undefined" ? (import.meta.env?.VITE_API_BASE_URL || "") : "";
+const NVIDIA_INVOKE_URL = `${API_BASE_URL}/api/nvidia/chat/completions`;
 const NVIDIA_MODEL = "google/gemma-4-31b-it";
 
 export type AiProvider = "gemini" | "nvidia";
@@ -19,6 +17,8 @@ export type AiProviderConfig = {
   apiKey?: string;
   model?: string;
 };
+
+const DEFAULT_AI_PROVIDER: AiProvider = "gemini";
 
 export type TestCaseData = {
   title: string;
@@ -34,6 +34,8 @@ export type GenerateResponse = {
   testCases: TestCaseData[];
   summarizedRequirements: string;
 };
+
+export type RequirementAnalysis = { requirements: Requirement[]; clarificationQuestions: string[] };
 
 const priorityGuidance = `
 Priority assessment (required): assign exactly one priority based on the impact if the scenario fails and its likelihood of occurring.
@@ -53,19 +55,17 @@ async function generateJson(
   temperature: number,
   providerConfig: AiProviderConfig = {},
 ): Promise<unknown> {
-  const provider = providerConfig.provider || "gemini";
+  const provider = providerConfig.provider || DEFAULT_AI_PROVIDER;
 
   if (provider === "nvidia") {
-    if (!providerConfig.apiKey?.trim()) {
-      throw new Error("NVIDIA API key is required.");
-    }
+    const apiKey = providerConfig.apiKey?.trim();
 
     const response = await fetch(NVIDIA_INVOKE_URL, {
       method: "POST",
       headers: {
-        Authorization: `Bearer ${providerConfig.apiKey.trim()}`,
         Accept: "application/json",
         "Content-Type": "application/json",
+        ...(apiKey ? { "X-Nvidia-Api-Key": apiKey } : {}),
       },
       body: JSON.stringify({
         messages: [{ role: "user", content: `${prompt}\n\nReturn only valid JSON. Do not use Markdown code fences.` }],
@@ -202,6 +202,88 @@ const singleTestCaseSchema: Schema = {
     "priority",
   ],
 };
+
+const requirementSchema: Schema = {
+  type: Type.OBJECT,
+  properties: {
+    id: { type: Type.STRING }, title: { type: Type.STRING }, statement: { type: Type.STRING },
+    acceptanceCriteria: { type: Type.ARRAY, items: { type: Type.STRING } },
+    risks: { type: Type.ARRAY, items: { type: Type.STRING } },
+  },
+  required: ["id", "title", "statement", "acceptanceCriteria", "risks"],
+};
+
+const requirementAnalysisSchema: Schema = {
+  type: Type.OBJECT,
+  properties: {
+    requirements: { type: Type.ARRAY, items: requirementSchema },
+    clarificationQuestions: { type: Type.ARRAY, items: { type: Type.STRING } },
+  },
+  required: ["requirements", "clarificationQuestions"],
+};
+
+const reviewSchema: Schema = {
+  type: Type.OBJECT,
+  properties: {
+    testCaseId: { type: Type.STRING }, score: { type: Type.NUMBER }, priorityReason: { type: Type.STRING },
+    riskAreas: { type: Type.ARRAY, items: { type: Type.STRING } },
+    findings: {
+      type: Type.ARRAY,
+      items: {
+        type: Type.OBJECT,
+        properties: {
+          severity: { type: Type.STRING, enum: ["High", "Medium", "Low"] },
+          category: { type: Type.STRING, enum: ["Coverage", "Clarity", "Data", "Expected result", "Duplication", "Risk"] },
+          message: { type: Type.STRING }, suggestion: { type: Type.STRING },
+        }, required: ["severity", "category", "message", "suggestion"],
+      },
+    },
+  }, required: ["testCaseId", "score", "priorityReason", "riskAreas", "findings"],
+};
+
+const qaReviewSchema: Schema = { type: Type.OBJECT, properties: { reviews: { type: Type.ARRAY, items: reviewSchema } }, required: ["reviews"] };
+
+const coverageSchema: Schema = { type: Type.OBJECT, properties: { coverage: { type: Type.ARRAY, items: { type: Type.OBJECT, properties: {
+  requirementId: { type: Type.STRING }, testCaseIds: { type: Type.ARRAY, items: { type: Type.STRING } },
+}, required: ["requirementId", "testCaseIds"] } } }, required: ["coverage"] };
+
+const testDataSchema: Schema = {
+  type: Type.OBJECT,
+  properties: {
+    testCaseId: { type: Type.STRING },
+    items: { type: Type.ARRAY, items: { type: Type.OBJECT, properties: {
+      label: { type: Type.STRING }, category: { type: Type.STRING, enum: ["Valid", "Invalid", "Boundary", "Empty", "Special format"] },
+      value: { type: Type.STRING }, expectedOutcome: { type: Type.STRING },
+    }, required: ["label", "category", "value", "expectedOutcome"] } },
+  }, required: ["testCaseId", "items"],
+};
+
+export async function analyzeRequirements(context: string, requirements: string, providerConfig?: AiProviderConfig): Promise<RequirementAnalysis> {
+  const prompt = `You are a senior QA analyst. Convert the following product context and requirements into atomic, testable requirements. Use stable IDs REQ-01, REQ-02, etc. Acceptance criteria must be observable. Identify only genuine ambiguities as clarification questions.\n\nProduct context:\n${context}\n\nRequirements:\n${requirements}`;
+  return await generateJson(prompt, requirementAnalysisSchema, 0.1, providerConfig) as RequirementAnalysis;
+}
+
+export async function reviewTestCases(requirements: Requirement[], testCases: Array<{ _id: string; title: string; description: string; preconditions: string; steps: string[]; expected_result: string; type: string; priority: string }>, providerConfig?: AiProviderConfig): Promise<TestCaseReview[]> {
+  const prompt = `You are a QA lead reviewing a test suite. Review every test case below against the requirements. Score 0-100 for completeness and testability. Report only actionable findings. Check duplication, unclear steps, missing test data, unobservable expected results, coverage gaps, and risk. Reassess each priority and explain the reason.\n\nRequirements:\n${JSON.stringify(requirements)}\n\nTest cases:\n${JSON.stringify(testCases)}`;
+  const result = await generateJson(prompt, qaReviewSchema, 0.1, providerConfig) as { reviews: TestCaseReview[] };
+  return result.reviews;
+}
+
+export async function mapTestCoverage(requirements: Requirement[], testCases: Array<{ _id: string; title: string; description: string; preconditions: string; steps: string[]; expected_result: string }>, providerConfig?: AiProviderConfig): Promise<Record<string, string[]>> {
+  const prompt = `You are a QA lead. Create a strict requirement-to-testcase traceability map. Link a testcase only when it meaningfully verifies the requirement or one of its acceptance criteria. Do not infer links from matching words alone. Include every requirement, using an empty array when no testcase covers it.\n\nRequirements:\n${JSON.stringify(requirements)}\n\nTest cases:\n${JSON.stringify(testCases)}`;
+  const result = await generateJson(prompt, coverageSchema, 0.1, providerConfig) as { coverage: Array<{ requirementId: string; testCaseIds: string[] }> };
+  return Object.fromEntries(result.coverage.map((item) => [item.requirementId, item.testCaseIds]));
+}
+
+export async function generateTestData(testCase: { _id: string; title: string; description: string; preconditions: string; steps: string[]; expected_result: string }, providerConfig?: AiProviderConfig): Promise<TestDataSet> {
+  const prompt = `You are a QA test-data specialist. Create a practical, safe test-data set for this test case. Include valid, invalid, boundary, empty, and special-format data only when relevant. Do not use real personal, payment, or secret data. Make each expected outcome directly testable.\n\nTest case:\n${JSON.stringify(testCase)}`;
+  return await generateJson(prompt, testDataSchema, 0.15, providerConfig) as TestDataSet;
+}
+
+export async function generateSecurityTestCases(context: string, requirements: string, providerConfig?: AiProviderConfig): Promise<TestCaseData[]> {
+  const prompt = `You are an application security QA specialist. Create authorized, defensive test cases for the supplied product context and requirements. Cover only relevant areas: authentication, authorization, sessions, input validation, error handling, API protection, and business logic. Keep payloads benign and describe safe test data rather than exploit instructions. Each test case must be actionable and include priority.\n\nProduct context:\n${context}\n\nRequirements:\n${requirements}\n${priorityGuidance}`;
+  return await generateJson(prompt, testCaseSchema, 0.15, providerConfig) as TestCaseData[];
+}
 
 export async function updateTestCaseAI(
   testCase: any,

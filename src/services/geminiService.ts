@@ -4,10 +4,6 @@ const apiKeyFromVite = typeof import.meta !== "undefined" ? import.meta.env?.VIT
 const apiKeyFromNode = typeof process !== "undefined" ? process.env?.GEMINI_API_KEY : undefined;
 const GEMINI_API_KEY = apiKeyFromVite || apiKeyFromNode || "";
 
-if (!GEMINI_API_KEY) {
-  console.warn("Gemini API key is missing. Set VITE_GEMINI_API_KEY (frontend build) or GEMINI_API_KEY (server).");
-}
-
 const ai = new GoogleGenAI({ apiKey: GEMINI_API_KEY });
 const GEMINI_MODEL = "gemini-2.5-flash";
 
