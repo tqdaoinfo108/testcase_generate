@@ -253,6 +253,9 @@ const testDataSchema: Schema = {
   }, required: ["testCaseId", "items"],
 };
 
+const apiDataCaseSchema: Schema = { type: Type.OBJECT, properties: { items: { type: Type.ARRAY, items: { type: Type.OBJECT, properties: { name: { type: Type.STRING }, category: { type: Type.STRING, enum: ["Valid", "Invalid", "Boundary", "Missing field"] }, inputValues: { type: Type.STRING }, expectedOutcome: { type: Type.STRING } }, required: ["name", "category", "inputValues", "expectedOutcome"] } } }, required: ["items"] };
+export type ApiAiDataCase = { name: string; category: "Valid" | "Invalid" | "Boundary" | "Missing field"; inputValues: string; expectedOutcome: string };
+
 export async function analyzeRequirements(context: string, requirements: string, providerConfig?: AiProviderConfig): Promise<RequirementAnalysis> {
   const prompt = `${qaOperatingRules}
 Convert NEW requirements into independent atomic requirements that a QA can trace to testcases. Keep source order and use REQ-01, REQ-02, etc. Each statement must describe one behavior. Acceptance criteria must be observable. List concrete delivery/test risks. Ask a clarification question only when its answer changes scope, access, expected behavior, data rule, priority, or outcome; never ask generic questions.
@@ -292,6 +295,14 @@ Create the smallest practical synthetic dataset that makes this testcase repeata
 <qa_profile>${qaProfile}</qa_profile>
 <testcase>${JSON.stringify(testCase)}</testcase>`;
   return await generateJson(prompt, testDataSchema, 0.15, providerConfig) as TestDataSet;
+}
+
+export async function generateApiDataCases(apiTemplate: { name: string; method: string; path: string; requestBody: string; validationRules: string }, providerConfig?: AiProviderConfig): Promise<ApiAiDataCase[]> {
+  const prompt = `${qaOperatingRules}
+You are a QA API test-data specialist. Generate a small, practical set of synthetic API data cases: valid, invalid, boundary, and missing-field only when relevant. Each inputValues value must be valid JSON when the request body is JSON. Expected outcome must be observable and align with the supplied validation rules. Do not invent credentials, private data, endpoints, or unsupported fields.
+<api_template>${JSON.stringify(apiTemplate)}</api_template>`;
+  const result = await generateJson(prompt, apiDataCaseSchema, 0.15, providerConfig) as { items: ApiAiDataCase[] };
+  return result.items;
 }
 
 export async function generateSecurityTestCases(context: string, requirements: string, providerConfig?: AiProviderConfig): Promise<TestCaseData[]> {
