@@ -3,6 +3,8 @@ export const BASEROW_CONFIG = Object.freeze({
   baseUrl: import.meta.env.VITE_BASEROW_API_URL || "https://api.baserow.io/api/database/rows/table",
   token: import.meta.env.VITE_BASEROW_TOKEN || "KUOAepR6iaz2YwJ1J9E9Sxv0f26Mf1Ns",
 });
+/** Baserow Date fields accept calendar dates, not ISO date-time values. */
+export const baserowDate = (date = new Date()) => date.toISOString().slice(0, 10);
 export const QA_TABLES = { profile: 1124591, requirements: 1124592, reviews: 1124593, execution: 1124594, environments: 1124595, templates: 1124596, dataSets: 1124597, runs: 1124598 } as const;
 export type QaTable = keyof typeof QA_TABLES;
 export const baserowHeaders = () => { if (!BASEROW_CONFIG.token) throw new Error("Chưa cấu hình VITE_BASEROW_TOKEN cho ứng dụng."); return { Authorization: `Token ${BASEROW_CONFIG.token}`, "Content-Type": "application/json" }; };
@@ -13,4 +15,4 @@ export async function updateQaRow<T extends Record<string, unknown>>(table: QaTa
 export async function deleteQaRow(table: QaTable, id: string | number): Promise<void> { const response = await fetch(`${BASEROW_CONFIG.baseUrl}/${QA_TABLES[table]}/${id}/?user_field_names=true`, { method: "DELETE", headers: baserowHeaders() }); if (!response.ok) throw new Error(`Không thể xoá dữ liệu QA (HTTP ${response.status}).`); }
 export type QaProjectProfile = Record<string, string | number | undefined> & { id?: number; Name: string; projectId: string; updatedAt: string };
 export async function loadQaProfile(projectId: string): Promise<QaProjectProfile | null> { return (await listQaRows<QaProjectProfile>("profile", projectId))[0] || null; }
-export async function saveQaProfile(profile: QaProjectProfile) { const existing = await loadQaProfile(profile.projectId); const fields = { ...profile, updatedAt: new Date().toISOString() }; return existing?.id ? updateQaRow("profile", existing.id, fields) : createQaRow("profile", fields); }
+export async function saveQaProfile(profile: QaProjectProfile) { const existing = await loadQaProfile(profile.projectId); const fields = { ...profile, updatedAt: baserowDate() }; return existing?.id ? updateQaRow("profile", existing.id, fields) : createQaRow("profile", fields); }

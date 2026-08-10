@@ -20,7 +20,7 @@ export type TestCase = {
 
 import { analyzeRequirements, generateSecurityTestCases, generateTestCases, updateTestCaseAI, regenerateTestCaseAI, type AiProviderConfig, type TestCaseData } from "./aiService";
 import type { Requirement } from "./qaWorkspace";
-import { BASEROW_CONFIG, baserowHeaders, loadQaProfile } from "./qaBaserow";
+import { BASEROW_CONFIG, baserowDate, baserowHeaders, loadQaProfile } from "./qaBaserow";
 
 const BASEROW_URL = BASEROW_CONFIG.baseUrl;
 const PROJECTS_TABLE_ID = "905209";
@@ -44,7 +44,7 @@ async function saveGeneratedTestCases(projectId: string, testCases: TestCaseData
     const res = await fetch(`${BASEROW_URL}/${TESTCASES_TABLE_ID}/?user_field_names=true`, {
       method: "POST", headers: getHeaders(), body: JSON.stringify({ projectId, title: testCase.title, description: testCase.description,
         preconditions: testCase.preconditions, steps: JSON.stringify(testCase.steps), expected_result: testCase.expected_result,
-        type: testCase.type, priority: testCase.priority, createdAt: new Date().toISOString() }),
+        type: testCase.type, priority: testCase.priority, createdAt: baserowDate() }),
     });
     if (!res.ok) throw new Error("Failed to save generated test case");
     saved.push(toTestCase(await res.json(), projectId));
@@ -69,7 +69,7 @@ export const api = {
     const res = await fetch(`${BASEROW_URL}/${PROJECTS_TABLE_ID}/?user_field_names=true`, {
       method: "POST",
       headers: getHeaders(),
-      body: JSON.stringify({ name, context: "", createdAt: new Date().toISOString() }),
+      body: JSON.stringify({ name, context: "", createdAt: baserowDate() }),
     });
     if (!res.ok) throw new Error("Failed to create project");
     const row = await res.json();
