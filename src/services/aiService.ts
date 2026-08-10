@@ -263,8 +263,8 @@ export async function analyzeRequirements(context: string, requirements: string,
   return await generateJson(prompt, requirementAnalysisSchema, 0.1, providerConfig) as RequirementAnalysis;
 }
 
-export async function reviewTestCases(requirements: Requirement[], testCases: Array<{ _id: string; title: string; description: string; preconditions: string; steps: string[]; expected_result: string; type: string; priority: string }>, providerConfig?: AiProviderConfig): Promise<TestCaseReview[]> {
-  const prompt = `You are a QA lead reviewing a test suite. Review every test case below against the requirements. Score 0-100 for completeness and testability. Report only actionable findings. Check duplication, unclear steps, missing test data, unobservable expected results, coverage gaps, and risk. Reassess each priority and explain the reason.\n\nRequirements:\n${JSON.stringify(requirements)}\n\nTest cases:\n${JSON.stringify(testCases)}`;
+export async function reviewTestCases(requirements: Requirement[], testCases: Array<{ _id: string; title: string; description: string; preconditions: string; steps: string[]; expected_result: string; type: string; priority: string }>, providerConfig?: AiProviderConfig, qaProfile = ""): Promise<TestCaseReview[]> {
+  const prompt = `You are a QA lead reviewing a test suite. Review every test case below against the requirements. Score 0-100 for completeness and testability. Report only actionable findings. Check duplication, unclear steps, missing test data, unobservable expected results, coverage gaps, and risk. Reassess each priority and explain the reason.\n\nQA project profile:\n${qaProfile}\n\nRequirements:\n${JSON.stringify(requirements)}\n\nTest cases:\n${JSON.stringify(testCases)}`;
   const result = await generateJson(prompt, qaReviewSchema, 0.1, providerConfig) as { reviews: TestCaseReview[] };
   return result.reviews;
 }
@@ -275,8 +275,8 @@ export async function mapTestCoverage(requirements: Requirement[], testCases: Ar
   return Object.fromEntries(result.coverage.map((item) => [item.requirementId, item.testCaseIds]));
 }
 
-export async function generateTestData(testCase: { _id: string; title: string; description: string; preconditions: string; steps: string[]; expected_result: string }, providerConfig?: AiProviderConfig): Promise<TestDataSet> {
-  const prompt = `You are a QA test-data specialist. Create a practical, safe test-data set for this test case. Include valid, invalid, boundary, empty, and special-format data only when relevant. Do not use real personal, payment, or secret data. Make each expected outcome directly testable.\n\nTest case:\n${JSON.stringify(testCase)}`;
+export async function generateTestData(testCase: { _id: string; title: string; description: string; preconditions: string; steps: string[]; expected_result: string }, providerConfig?: AiProviderConfig, qaProfile = ""): Promise<TestDataSet> {
+  const prompt = `You are a QA test-data specialist. Create a practical, safe test-data set for this test case. Include valid, invalid, boundary, empty, and special-format data only when relevant. Do not use real personal, payment, or secret data. Make each expected outcome directly testable.\n\nQA project profile:\n${qaProfile}\n\nTest case:\n${JSON.stringify(testCase)}`;
   return await generateJson(prompt, testDataSchema, 0.15, providerConfig) as TestDataSet;
 }
 

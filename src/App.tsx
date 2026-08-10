@@ -15,7 +15,6 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "
 import { Toaster } from "@/components/ui/sonner";
 import { toast } from "sonner";
 import { api, Project, TestCase } from "@/src/services/api";
-import type { AiProvider, AiProviderConfig } from "@/src/services/aiService";
 import { QaWorkspaceDialog } from "@/src/components/QaWorkspaceDialog";
 import { getExecution, loadQaWorkspace } from "@/src/services/qaWorkspace";
 import { Sparkles, RefreshCw, Download, Trash2, Edit2, CheckSquare, Loader2, RotateCcw, ChevronDown, ChevronUp, Folder, Plus, MoreVertical, PanelLeft, Settings } from "lucide-react";
@@ -53,11 +52,6 @@ export default function App() {
   const [isDeleting, setIsDeleting] = useState(false);
   const [deleteProgress, setDeleteProgress] = useState<{ current: number; total: number } | null>(null);
   const [operationStatus, setOperationStatus] = useState("");
-  const [aiFallbackError, setAiFallbackError] = useState("");
-  const [isAiFallbackOpen, setIsAiFallbackOpen] = useState(false);
-  const [fallbackProvider, setFallbackProvider] = useState<AiProvider>("gemini");
-  const [fallbackApiKey, setFallbackApiKey] = useState("");
-  const [fallbackModel, setFallbackModel] = useState("gemini-2.5-flash");
 
   // Load Projects on Mount
   useEffect(() => {
@@ -65,10 +59,8 @@ export default function App() {
   }, []);
 
   const saveSettings = () => {
-    localStorage.setItem("BASEROW_PROJECTS_TABLE_ID", projectsTableId);
-    localStorage.setItem("BASEROW_TESTCASES_TABLE_ID", testCasesTableId);
     setIsSettingsOpen(false);
-    toast.success("Settings saved");
+    toast.success("Cấu hình bảng dùng ID chuẩn của ứng dụng.");
     loadProjects();
   };
 
@@ -169,7 +161,7 @@ export default function App() {
   };
 
   // Test Case Actions
-  const runGenerate = async (providerConfig?: AiProviderConfig) => {
+  const runGenerate = async () => {
     if (isGeneratingRef.current) {
       return;
     }
@@ -187,7 +179,7 @@ export default function App() {
     setIsGenerating(true);
     setOperationStatus("Generating test cases...");
     try {
-      const { testCases: newTestCases, updatedContext } = await api.generateTestCases(selectedProjectId, newRequirements, providerConfig);
+      const { testCases: newTestCases, updatedContext } = await api.generateTestCases(selectedProjectId, newRequirements);
 
       await loadProjects(selectedProjectId);
       await loadTestCases(selectedProjectId);
@@ -200,13 +192,7 @@ export default function App() {
     } catch (error) {
       console.error(error);
       const message = error instanceof Error ? error.message : "Failed to generate test cases.";
-      if (!providerConfig) {
-        setAiFallbackError(message);
-        setIsAiFallbackOpen(true);
-        toast.error("Default AI provider failed. Choose a fallback provider to retry.");
-      } else {
-        toast.error(`Failed to generate test cases with ${providerConfig.provider}. Please check the API key and model.`);
-      }
+      toast.error(message);
     } finally {
       isGeneratingRef.current = false;
       setIsGenerating(false);
@@ -216,18 +202,6 @@ export default function App() {
 
   const handleGenerate = async () => runGenerate();
 
-  const handleRetryWithFallback = async () => {
-    if (!fallbackApiKey.trim()) {
-      toast.error("Enter an API key for the fallback provider.");
-      return;
-    }
-    setIsAiFallbackOpen(false);
-    await runGenerate({
-      provider: fallbackProvider,
-      apiKey: fallbackApiKey,
-      model: fallbackModel,
-    });
-  };
 
   const handleSelectAll = () => {
     if (filteredTestCases.length === 0) return;
@@ -367,7 +341,7 @@ export default function App() {
     }
   };
 
-  const handleExport = () => {
+  const handleExport = async () => {
     if (selectedIds.size === 0) {
       toast.error("Select at least one test case to export.");
       return;
@@ -379,10 +353,7 @@ export default function App() {
 
     const selectedCases = testCases.filter((tc) => selectedIds.has(tc._id));
 
-    const counterStorageKey = `EXPORT_COUNTER_${selectedProjectId || "global"}_${exportPrefix}`;
-    const previousCounterValue = Number.parseInt(localStorage.getItem(counterStorageKey) || "0", 10);
-    const previousCounter = Number.isNaN(previousCounterValue) ? 0 : previousCounterValue;
-    let runningCounter = previousCounter;
+    let runningCounter = 0;
     
     // Create worksheet data
     const wsData: any[][] = [];
@@ -397,7 +368,7 @@ export default function App() {
     wsData.push(headers);
     
     // Rows 5+: Data
-    const qaWorkspace = loadQaWorkspace(selectedProjectId);
+    const qaWorkspace = await loadQaWorkspace(selectedProjectId);
     selectedCases.forEach((tc) => {
       runningCounter += 1;
       const review = qaWorkspace.reviews.find((item) => item.testCaseId === tc._id);
@@ -417,8 +388,6 @@ export default function App() {
         execution.defectId,
       ]);
     });
-
-    localStorage.setItem(counterStorageKey, String(runningCounter));
 
     const ws = XLSX.utils.aoa_to_sheet(wsData);
 
@@ -797,53 +766,6 @@ export default function App() {
         onTestCasesChanged={async () => { if (selectedProjectId) await loadTestCases(selectedProjectId); }}
       />
 
-      <Dialog open={isAiFallbackOpen} onOpenChange={setIsAiFallbackOpen}>
-        <DialogContent className="sm:max-w-[460px]">
-          <DialogHeader>
-            <DialogTitle>AI provider is unavailable</DialogTitle>
-          </DialogHeader>
-          <div className="space-y-4 py-2">
-            <p className="rounded-md bg-red-50 p-3 text-sm text-red-700">
-              {aiFallbackError}
-            </p>
-            <div className="space-y-2">
-              <label className="text-sm font-medium text-slate-700">Fallback provider</label>
-              <select
-                value={fallbackProvider}
-                onChange={(event) => {
-                  const provider = event.target.value as AiProvider;
-                  setFallbackProvider(provider);
-                  setFallbackModel(provider === "nvidia" ? "google/gemma-4-31b-it" : "gemini-2.5-flash");
-                }}
-                className="flex h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-sm"
-              >
-                <option value="gemini">Gemini (another API key)</option>
-                <option value="nvidia">NVIDIA NIM (another API key)</option>
-              </select>
-            </div>
-            <div className="space-y-2">
-              <label className="text-sm font-medium text-slate-700">API key</label>
-              <Input
-                type="password"
-                value={fallbackApiKey}
-                onChange={(event) => setFallbackApiKey(event.target.value)}
-                placeholder={fallbackProvider === "nvidia" ? "nvapi-..." : "Gemini API key"}
-                autoComplete="off"
-              />
-              <p className="text-xs text-slate-500">The key is used only for this retry and is not saved.</p>
-            </div>
-            <div className="space-y-2">
-              <label className="text-sm font-medium text-slate-700">Model</label>
-              <Input value={fallbackModel} onChange={(event) => setFallbackModel(event.target.value)} />
-            </div>
-          </div>
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setIsAiFallbackOpen(false)}>Cancel</Button>
-            <Button onClick={handleRetryWithFallback}>Retry generation</Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
-      
       {/* Create Project Modal */}
       <Dialog open={isCreateProjectOpen} onOpenChange={setIsCreateProjectOpen}>
         <DialogContent className="sm:max-w-[400px]">

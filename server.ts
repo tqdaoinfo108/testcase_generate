@@ -7,16 +7,16 @@ import { Project } from "./src/models/Project.js";
 import { TestCaseModel } from "./src/models/TestCase.js";
 import { generateTestCases, updateTestCaseAI, regenerateTestCaseAI } from "./src/services/aiService.js";
 
-const MONGO_URI = "mongodb+srv://daotq:100897@testcase.x5m996z.mongodb.net/?appName=testcase";
+const MONGO_URI = process.env.MONGO_URI || "";
 const DB_UNAVAILABLE_MESSAGE = "Database is not connected. Check MONGO_URI and MongoDB Atlas network access.";
 
 async function startServer() {
   const app = express();
   const PORT = Number(process.env.PORT) || 3000;
-  const CORS_ORIGIN = "https://tqdaoinfo108.github.io";
+  const CORS_ORIGIN = process.env.CORS_ORIGIN || "";
 
   app.use((req, res, next) => {
-    res.header("Access-Control-Allow-Origin", CORS_ORIGIN);
+    if (CORS_ORIGIN) res.header("Access-Control-Allow-Origin", CORS_ORIGIN);
     res.header("Access-Control-Allow-Methods", "GET,POST,PUT,DELETE,OPTIONS");
     res.header("Access-Control-Allow-Headers", "Content-Type, Authorization");
 
@@ -40,12 +40,6 @@ async function startServer() {
     console.error("MongoDB connection error:", message);
   }
 
-  app.get("/api/env-check", (req, res) => {
-    res.json({
-      geminiKey: process.env.GEMINI_API_KEY,
-      apiKey: process.env.API_KEY
-    });
-  });
 
   // API Routes
 

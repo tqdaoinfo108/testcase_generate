@@ -1,107 +1,42 @@
 import type { TestCase } from "./api";
+import { createQaRow, listQaRows, updateQaRow } from "./qaBaserow";
 
-export type Requirement = {
-  id: string;
-  title: string;
-  statement: string;
-  acceptanceCriteria: string[];
-  risks: string[];
-};
-
-export type ReviewFinding = {
-  severity: "High" | "Medium" | "Low";
-  category: "Coverage" | "Clarity" | "Data" | "Expected result" | "Duplication" | "Risk";
-  message: string;
-  suggestion: string;
-};
-
-export type TestCaseReview = {
-  testCaseId: string;
-  score: number;
-  priorityReason: string;
-  riskAreas: string[];
-  findings: ReviewFinding[];
-};
-
-export type TestDataItem = {
-  label: string;
-  category: "Valid" | "Invalid" | "Boundary" | "Empty" | "Special format";
-  value: string;
-  expectedOutcome: string;
-};
-
-export type TestDataSet = { testCaseId: string; items: TestDataItem[] };
-
+export type Requirement = { rowId?: number; id: string; title: string; statement: string; acceptanceCriteria: string[]; risks: string[]; source?: string; status?: string };
+export type ReviewFinding = { severity: "High" | "Medium" | "Low"; category: "Coverage" | "Clarity" | "Data" | "Expected result" | "Duplication" | "Risk"; message: string; suggestion: string };
+export type TestCaseReview = { rowId?: number; testCaseId: string; score: number; priorityReason: string; riskAreas: string[]; findings: ReviewFinding[]; reviewStatus?: string };
+export type TestDataItem = { label: string; category: "Valid" | "Invalid" | "Boundary" | "Empty" | "Special format"; value: string; expectedOutcome: string };
+export type TestDataSet = { rowId?: number; testCaseId: string; items: TestDataItem[] };
 export type ExecutionStatus = "Not Run" | "Pass" | "Fail" | "Blocked";
+export type ExecutionRecord = { rowId?: number; status: ExecutionStatus; actualResult: string; evidenceUrl: string; defectId: string; executedBy: string; executedAt?: string };
+export type QaWorkspace = { requirements: Requirement[]; coverage: Record<string, string[]>; reviews: TestCaseReview[]; testData: TestDataSet[]; execution: Record<string, ExecutionRecord>; securityTestCaseIds: string[] };
 
-export type ExecutionRecord = {
-  status: ExecutionStatus;
-  actualResult: string;
-  evidenceUrl: string;
-  defectId: string;
-  executedBy: string;
-  executedAt?: string;
-};
+const json = <T>(value: unknown, fallback: T): T => { try { return value ? JSON.parse(String(value)) as T : fallback; } catch { return fallback; } };
+const empty = (): QaWorkspace => ({ requirements: [], coverage: {}, reviews: [], testData: [], execution: {}, securityTestCaseIds: [] });
 
-export type QaWorkspace = {
-  requirements: Requirement[];
-  coverage: Record<string, string[]>;
-  reviews: TestCaseReview[];
-  testData: TestDataSet[];
-  execution: Record<string, ExecutionRecord>;
-  securityTestCaseIds: string[];
-  updatedAt?: string;
-};
-
-const emptyWorkspace = (): QaWorkspace => ({ requirements: [], coverage: {}, reviews: [], testData: [], execution: {}, securityTestCaseIds: [] });
-const keyFor = (projectId: string) => `QA_WORKSPACE_${projectId}`;
-
-export function loadQaWorkspace(projectId: string | null): QaWorkspace {
-  if (!projectId) return emptyWorkspace();
-  try {
-    const parsed = JSON.parse(localStorage.getItem(keyFor(projectId)) || "null") as Partial<QaWorkspace> | null;
-    return {
-      ...emptyWorkspace(),
-      ...parsed,
-      execution: parsed?.execution || {},
-      coverage: parsed?.coverage || {},
-      requirements: parsed?.requirements || [],
-      reviews: parsed?.reviews || [],
-      testData: parsed?.testData || [],
-      securityTestCaseIds: parsed?.securityTestCaseIds || [],
-    };
-  } catch {
-    return emptyWorkspace();
-  }
+export async function loadQaWorkspace(projectId: string | null): Promise<QaWorkspace> {
+  if (!projectId) return empty();
+  const [requirements, reviews, execution, dataSets] = await Promise.all([
+    listQaRows<any>("requirements", projectId), listQaRows<any>("reviews", projectId), listQaRows<any>("execution", projectId), listQaRows<any>("dataSets", projectId),
+  ]);
+  return {
+    requirements: requirements.map((r) => ({ rowId: r.id, id: r.requirementId || `REQ-${r.id}`, title: r.Name || r.requirementId, statement: r.statement || "", acceptanceCriteria: json(r.acceptanceCriteria, []), risks: json(r.risks, []), source: json<{ origin?: string }>(r.source, { origin: r.source || "" }).origin || "", status: r.status || "Open" })),
+    coverage: Object.fromEntries(requirements.map((r) => [r.requirementId || `REQ-${r.id}`, json<{ coverageTestCaseIds?: string[] }>(r.source, {}).coverageTestCaseIds || []])),
+    reviews: reviews.map((r) => ({ rowId: r.id, testCaseId: String(r.testCaseId), score: Number(r.qualityScore || 0), priorityReason: r.priorityReason || "", riskAreas: json(r.riskAreas, []), findings: json(r.findings, []), reviewStatus: r.reviewStatus || "Open" })),
+    execution: Object.fromEntries(execution.map((r) => [String(r.testCaseId), { rowId: r.id, status: r.status || "Not Run", actualResult: r.actualResult || "", evidenceUrl: r.evidenceUrl || "", defectId: r.defectId || "", executedBy: r.executedBy || "", executedAt: r.executedAt }])),
+    testData: dataSets.map((r) => ({ rowId: r.id, testCaseId: String(r.relatedTestCaseId || ""), items: json(r.inputValues, []) })),
+    securityTestCaseIds: [],
+  };
 }
 
-export function saveQaWorkspace(projectId: string, workspace: QaWorkspace): QaWorkspace {
-  const next = { ...workspace, updatedAt: new Date().toISOString() };
-  localStorage.setItem(keyFor(projectId), JSON.stringify(next));
-  return next;
+export async function saveRequirements(projectId: string, requirements: Requirement[], coverage: Record<string, string[]>) {
+  await Promise.all(requirements.map(async (item) => {
+    const fields = { Name: item.title, projectId, requirementId: item.id, statement: item.statement, acceptanceCriteria: JSON.stringify(item.acceptanceCriteria), risks: JSON.stringify(item.risks), source: JSON.stringify({ origin: item.source || "QA Workspace", coverageTestCaseIds: coverage[item.id] || [] }), status: item.status || "Open", updatedAt: new Date().toISOString() };
+    if (item.rowId) await updateQaRow("requirements", item.rowId, fields); else await createQaRow("requirements", { ...fields, createdAt: new Date().toISOString() });
+  }));
 }
-
-export function getExecution(workspace: QaWorkspace, testCaseId: string): ExecutionRecord {
-  return workspace.execution[testCaseId] || { status: "Not Run", actualResult: "", evidenceUrl: "", defectId: "", executedBy: "" };
-}
-
-export function buildCoverage(requirements: Requirement[], testCases: TestCase[], coverageMap: Record<string, string[]> = {}) {
-  return requirements.map((requirement) => {
-    const terms = `${requirement.title} ${requirement.statement} ${requirement.acceptanceCriteria.join(" ")}`
-      .toLowerCase().split(/[^\p{L}\p{N}]+/u).filter((term) => term.length > 3);
-    const inferred = testCases.filter((testCase) => {
-      const text = `${testCase.title} ${testCase.description} ${testCase.preconditions} ${testCase.steps.join(" ")} ${testCase.expected_result}`.toLowerCase();
-      return terms.some((term) => text.includes(term));
-    });
-    const matched = coverageMap[requirement.id]
-      ? testCases.filter((testCase) => coverageMap[requirement.id].includes(testCase._id))
-      : inferred;
-    return {
-      requirement,
-      testCases: matched,
-      positive: matched.some((item) => item.type === "Positive Flow"),
-      negative: matched.some((item) => item.type === "Negative Flow"),
-      edge: matched.some((item) => item.type === "Edge Case"),
-    };
-  });
-}
+export async function deleteRequirement(rowId: number) { await fetch(`${import.meta.env.VITE_BASEROW_API_URL || "https://api.baserow.io/api/database/rows/table"}/1124592/${rowId}/?user_field_names=true`, { method: "DELETE", headers: { Authorization: `Token ${import.meta.env.VITE_BASEROW_TOKEN || ""}` } }); }
+export async function saveReview(projectId: string, review: TestCaseReview) { const fields = { Name: `Review ${review.testCaseId}`, projectId, testCaseId: review.testCaseId, qualityScore: review.score, priorityReason: review.priorityReason, riskAreas: JSON.stringify(review.riskAreas), findings: JSON.stringify(review.findings), reviewStatus: review.reviewStatus || "Open", reviewedAt: new Date().toISOString() }; return review.rowId ? updateQaRow("reviews", review.rowId, fields) : createQaRow("reviews", fields); }
+export async function saveExecution(projectId: string, testCaseId: string, record: ExecutionRecord) { const fields = { Name: `Execution ${testCaseId}`, projectId, testCaseId, status: record.status, actualResult: record.actualResult, evidenceUrl: record.evidenceUrl, defectId: record.defectId, executedBy: record.executedBy, executedAt: new Date().toISOString(), updatedAt: new Date().toISOString() }; return record.rowId ? updateQaRow("execution", record.rowId, fields) : createQaRow("execution", fields); }
+export async function saveTestData(projectId: string, testCaseId: string, data: TestDataSet) { const fields = { Name: `Test data ${testCaseId}`, projectId, templateId: "", relatedTestCaseId: testCaseId, category: "AI generated", inputValues: JSON.stringify(data.items), expectedOutcome: "See input values", updatedAt: new Date().toISOString() }; return data.rowId ? updateQaRow("dataSets", data.rowId, fields) : createQaRow("dataSets", { ...fields, createdAt: new Date().toISOString() }); }
+export function getExecution(workspace: QaWorkspace, testCaseId: string): ExecutionRecord { return workspace.execution[testCaseId] || { status: "Not Run", actualResult: "", evidenceUrl: "", defectId: "", executedBy: "" }; }
+export function buildCoverage(requirements: Requirement[], testCases: TestCase[], coverageMap: Record<string, string[]> = {}) { return requirements.map((requirement) => { const matched = testCases.filter((testCase) => (coverageMap[requirement.id] || []).includes(testCase._id)); return { requirement, testCases: matched, positive: matched.some((x) => x.type === "Positive Flow"), negative: matched.some((x) => x.type === "Negative Flow"), edge: matched.some((x) => x.type === "Edge Case") }; }); }

@@ -20,8 +20,10 @@ export type TestCase = {
 
 import { analyzeRequirements, generateSecurityTestCases, generateTestCases, updateTestCaseAI, regenerateTestCaseAI, type AiProviderConfig, type TestCaseData } from "./aiService";
 import type { Requirement } from "./qaWorkspace";
+import { loadQaProfile } from "./qaBaserow";
 
-const BASEROW_API_KEY = "KUOAepR6iaz2YwJ1J9E9Sxv0f26Mf1Ns";
+const BASEROW_API_KEY = import.meta.env.VITE_BASEROW_TOKEN || "";
+const BASEROW_URL = import.meta.env.VITE_BASEROW_API_URL || "https://api.baserow.io/api/database/rows/table";
 const PROJECTS_TABLE_ID = "905209";
 const TESTCASES_TABLE_ID = "905210";
 
@@ -29,6 +31,10 @@ const getHeaders = () => ({
   "Authorization": `Token ${BASEROW_API_KEY}`,
   "Content-Type": "application/json"
 });
+const withQaProfile = async (projectId: string, context: string) => {
+  const profile = await loadQaProfile(projectId);
+  return profile ? `${context}\n\nQA PROJECT PROFILE:\n${Object.entries(profile).filter(([key, value]) => !["id", "projectId", "updatedAt"].includes(key) && value).map(([key, value]) => `${key}: ${value}`).join("\n")}` : context;
+};
 
 const toTestCase = (row: any, projectId = ""): TestCase => ({
   _id: row.id.toString(), projectId: row.projectId || projectId, title: row.title || "", description: row.description || "",
@@ -39,7 +45,7 @@ const toTestCase = (row: any, projectId = ""): TestCase => ({
 async function saveGeneratedTestCases(projectId: string, testCases: TestCaseData[]): Promise<TestCase[]> {
   const saved: TestCase[] = [];
   for (const testCase of testCases) {
-    const res = await fetch(`https://api.baserow.io/api/database/rows/table/${TESTCASES_TABLE_ID}/?user_field_names=true`, {
+    const res = await fetch(`${BASEROW_URL}/${TESTCASES_TABLE_ID}/?user_field_names=true`, {
       method: "POST", headers: getHeaders(), body: JSON.stringify({ projectId, title: testCase.title, description: testCase.description,
         preconditions: testCase.preconditions, steps: JSON.stringify(testCase.steps), expected_result: testCase.expected_result,
         type: testCase.type, priority: testCase.priority, createdAt: new Date().toISOString() }),
@@ -53,7 +59,7 @@ async function saveGeneratedTestCases(projectId: string, testCases: TestCaseData
 export const api = {
   // Projects
   getProjects: async (): Promise<Project[]> => {
-    const res = await fetch(`https://api.baserow.io/api/database/rows/table/${PROJECTS_TABLE_ID}/?user_field_names=true`, { headers: getHeaders() });
+    const res = await fetch(`${BASEROW_URL}/${PROJECTS_TABLE_ID}/?user_field_names=true`, { headers: getHeaders() });
     if (!res.ok) throw new Error("Failed to fetch projects");
     const data = await res.json();
     return data.results.map((row: any) => ({
@@ -64,7 +70,7 @@ export const api = {
     }));
   },
   createProject: async (name: string): Promise<Project> => {
-    const res = await fetch(`https://api.baserow.io/api/database/rows/table/${PROJECTS_TABLE_ID}/?user_field_names=true`, {
+    const res = await fetch(`${BASEROW_URL}/${PROJECTS_TABLE_ID}/?user_field_names=true`, {
       method: "POST",
       headers: getHeaders(),
       body: JSON.stringify({ name, context: "", createdAt: new Date().toISOString() }),
@@ -79,7 +85,7 @@ export const api = {
     };
   },
   updateProject: async (id: string, name: string, context: string): Promise<Project> => {
-    const res = await fetch(`https://api.baserow.io/api/database/rows/table/${PROJECTS_TABLE_ID}/${id}/?user_field_names=true`, {
+    const res = await fetch(`${BASEROW_URL}/${PROJECTS_TABLE_ID}/${id}/?user_field_names=true`, {
       method: "PATCH",
       headers: getHeaders(),
       body: JSON.stringify({ name, context }),
@@ -94,7 +100,7 @@ export const api = {
     };
   },
   deleteProject: async (id: string): Promise<void> => {
-    const res = await fetch(`https://api.baserow.io/api/database/rows/table/${PROJECTS_TABLE_ID}/${id}/`, { method: "DELETE", headers: getHeaders() });
+    const res = await fetch(`${BASEROW_URL}/${PROJECTS_TABLE_ID}/${id}/`, { method: "DELETE", headers: getHeaders() });
     if (!res.ok) throw new Error("Failed to delete project");
     
     // Delete associated test cases
@@ -111,7 +117,7 @@ export const api = {
   // Test Cases
   getTestCases: async (projectId: string): Promise<TestCase[]> => {
     // Using filter to get test cases for the project
-    const res = await fetch(`https://api.baserow.io/api/database/rows/table/${TESTCASES_TABLE_ID}/?user_field_names=true&filter__projectId__equal=${projectId}`, { headers: getHeaders() });
+    const res = await fetch(`${BASEROW_URL}/${TESTCASES_TABLE_ID}/?user_field_names=true&filter__projectId__equal=${projectId}`, { headers: getHeaders() });
     if (!res.ok) throw new Error("Failed to fetch test cases");
     const data = await res.json();
     return data.results.map((row: any) => ({
@@ -134,7 +140,7 @@ export const api = {
     if (!project) throw new Error("Project not found");
 
     // 2. Generate test cases using AI
-    const { testCases, summarizedRequirements } = await generateTestCases(project.context, newRequirements, providerConfig);
+    const { testCases, summarizedRequirements } = await generateTestCases(await withQaProfile(projectId, project.context), newRequirements, providerConfig);
     
     // 3. Save test cases to Baserow
     const savedTestCases = await saveGeneratedTestCases(projectId, testCases);
@@ -148,17 +154,17 @@ export const api = {
   analyzeRequirements: async (projectId: string, requirements: string, providerConfig?: AiProviderConfig): Promise<Requirement[]> => {
     const project = (await api.getProjects()).find((item) => item._id === projectId);
     if (!project) throw new Error("Project not found");
-    return (await analyzeRequirements(project.context, requirements, providerConfig)).requirements;
+    return (await analyzeRequirements(await withQaProfile(projectId, project.context), requirements, providerConfig)).requirements;
   },
   generateSecurityTestCases: async (projectId: string, requirements: string, providerConfig?: AiProviderConfig): Promise<TestCase[]> => {
     const project = (await api.getProjects()).find((item) => item._id === projectId);
     if (!project) throw new Error("Project not found");
-    const generated = await generateSecurityTestCases(project.context, requirements, providerConfig);
+    const generated = await generateSecurityTestCases(await withQaProfile(projectId, project.context), requirements, providerConfig);
     return saveGeneratedTestCases(projectId, generated);
   },
   smartEditTestCase: async (id: string, newTitle: string, newDescription: string, providerConfig?: AiProviderConfig): Promise<TestCase> => {
     // 1. Get existing test case
-    const resGet = await fetch(`https://api.baserow.io/api/database/rows/table/${TESTCASES_TABLE_ID}/${id}/?user_field_names=true`, { headers: getHeaders() });
+    const resGet = await fetch(`${BASEROW_URL}/${TESTCASES_TABLE_ID}/${id}/?user_field_names=true`, { headers: getHeaders() });
     if (!resGet.ok) throw new Error("Failed to fetch test case");
     const row = await resGet.json();
     const existingTestCase = {
@@ -174,13 +180,13 @@ export const api = {
     // 1.5 Get project context
     const projects = await api.getProjects();
     const project = projects.find(p => p._id === row.projectId);
-    const context = project?.context || "";
+    const context = await withQaProfile(row.projectId, project?.context || "");
 
     // 2. AI update
     const updatedData = await updateTestCaseAI(existingTestCase as any, newTitle, newDescription, context, providerConfig);
 
     // 3. Save to Baserow
-    const resUpdate = await fetch(`https://api.baserow.io/api/database/rows/table/${TESTCASES_TABLE_ID}/${id}/?user_field_names=true`, {
+    const resUpdate = await fetch(`${BASEROW_URL}/${TESTCASES_TABLE_ID}/${id}/?user_field_names=true`, {
       method: "PATCH",
       headers: getHeaders(),
       body: JSON.stringify({
@@ -210,7 +216,7 @@ export const api = {
   },
   regenerateTestCase: async (id: string, providerConfig?: AiProviderConfig): Promise<TestCase> => {
     // 1. Get existing test case
-    const resGet = await fetch(`https://api.baserow.io/api/database/rows/table/${TESTCASES_TABLE_ID}/${id}/?user_field_names=true`, { headers: getHeaders() });
+    const resGet = await fetch(`${BASEROW_URL}/${TESTCASES_TABLE_ID}/${id}/?user_field_names=true`, { headers: getHeaders() });
     if (!resGet.ok) throw new Error("Failed to fetch test case");
     const row = await resGet.json();
     const existingTestCase = {
@@ -226,13 +232,13 @@ export const api = {
     // 1.5 Get project context
     const projects = await api.getProjects();
     const project = projects.find(p => p._id === row.projectId);
-    const context = project?.context || "";
+    const context = await withQaProfile(row.projectId, project?.context || "");
 
     // 2. AI regenerate
     const updatedData = await regenerateTestCaseAI(existingTestCase as any, context, providerConfig);
 
     // 3. Save to Baserow
-    const resUpdate = await fetch(`https://api.baserow.io/api/database/rows/table/${TESTCASES_TABLE_ID}/${id}/?user_field_names=true`, {
+    const resUpdate = await fetch(`${BASEROW_URL}/${TESTCASES_TABLE_ID}/${id}/?user_field_names=true`, {
       method: "PATCH",
       headers: getHeaders(),
       body: JSON.stringify({
@@ -261,7 +267,7 @@ export const api = {
     };
   },
   deleteTestCase: async (id: string): Promise<void> => {
-    const res = await fetch(`https://api.baserow.io/api/database/rows/table/${TESTCASES_TABLE_ID}/${id}/`, { method: "DELETE", headers: getHeaders() });
+    const res = await fetch(`${BASEROW_URL}/${TESTCASES_TABLE_ID}/${id}/`, { method: "DELETE", headers: getHeaders() });
     if (!res.ok) {
       let detail = "";
       try {
