@@ -29,7 +29,7 @@ const TESTCASES_TABLE_ID = "905210";
 const getHeaders = baserowHeaders;
 const withQaProfile = async (projectId: string, context: string) => {
   const profile = await loadQaProfile(projectId);
-  return profile ? `${context}\n\nQA PROJECT PROFILE:\n${Object.entries(profile).filter(([key, value]) => !["id", "projectId", "updatedAt"].includes(key) && value).map(([key, value]) => `${key}: ${value}`).join("\n")}` : context;
+  return profile ? `${context}\n\nQA PROJECT PROFILE:\n${Object.entries(profile).filter(([key, value]) => !["id", "projectId", "updatedAt"].includes(key) && value && !String(value).startsWith("[Chưa cập nhật]")).map(([key, value]) => `${key}: ${value}`).join("\n")}` : context;
 };
 
 const toTestCase = (row: any, projectId = ""): TestCase => ({
